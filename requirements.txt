@@ -1,0 +1,12 @@
+psycopg[binary]
+pandas<3
+sqlalchemy
+pyspark
+fastapi
+uvicorn
+streamlit
+anthropic
+sqlglot
+sentence-transformers
+pyyaml
+python-dotenv

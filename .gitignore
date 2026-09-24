@@ -1,0 +1,9 @@
+venv/
+.env
+data/raw/
+spark/jars/
+__pycache__/
+*.pyc
+eval/results/*.json
+spark-warehouse/
+metastore_db/
