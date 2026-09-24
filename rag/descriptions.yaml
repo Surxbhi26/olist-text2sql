@@ -1,0 +1,176 @@
+# Hand-written schema descriptions used to ground the LLM.
+# Column data types are NOT written here: index_schema.py reads them live from Postgres.
+# Run `python -m rag.check_descriptions` after editing to catch drift from the real schema.
+
+tables:
+  - name: customers
+    description: >
+      Customer location (state, city, zip) and identity. Needed for ANY question grouped by
+      state, city, or region, such as delivery delay by state or revenue by state.
+      IMPORTANT: customer_id is created per order, so the same person has a different
+      customer_id on each order. To count real people, repeat buyers, or retention, use
+      customer_unique_id.
+    columns:
+      customer_id: Per-order customer key. Joins to orders.customer_id. NOT a unique person.
+      customer_unique_id: The real person. Use COUNT(DISTINCT customer_unique_id) to count customers.
+      customer_zip_code_prefix: First 5 digits of the customer's zip code. Joins to geolocation_zip.
+      customer_city: Customer city name, lowercase, Portuguese, may lack accents.
+      customer_state: Two-letter Brazilian state code, e.g. SP (Sao Paulo), RJ (Rio de Janeiro), MG (Minas Gerais).
+
+  - name: orders
+    description: >
+      One row per customer order (99,441 orders, Sept 2016 to Oct 2018). Central fact table:
+      most questions start here. Data after Aug 2018 is very sparse.
+    columns:
+      order_id: Primary key.
+      customer_id: Per-order customer key. Join to customers to get customer_unique_id, city, state.
+      order_status: One of delivered, shipped, canceled, unavailable, invoiced, processing, created, approved. Most analyses exclude canceled and unavailable.
+      order_purchase_timestamp: When the customer placed the order. Use this for "orders in month X" and all time trends.
+      order_approved_at: When payment was approved. NULL if never approved.
+      order_delivered_carrier_date: When the order was handed to the logistics carrier (shipped). NULL if not shipped.
+      order_delivered_customer_date: When the customer received the order. NULL if not delivered.
+      order_estimated_delivery_date: Delivery date promised to the customer at purchase. Compare with order_delivered_customer_date for late deliveries.
+
+  - name: order_items
+    description: >
+      One row per item in an order. An order with 3 items has 3 rows. Revenue comes from this
+      table. Each item has its own seller, so one order can involve several sellers.
+    columns:
+      order_id: Joins to orders.order_id.
+      order_item_id: Item sequence number within the order (1, 2, 3...). Part of the primary key with order_id.
+      product_id: Joins to products.product_id.
+      seller_id: Joins to sellers.seller_id.
+      shipping_limit_date: Deadline for the seller to hand the item to the carrier.
+      price: Item price in BRL, excluding freight. Sum this for revenue.
+      freight_value: Shipping cost charged for this item, in BRL.
+
+  - name: order_payments
+    description: >
+      One row per payment used on an order. An order can have several rows, for example a
+      voucher plus a credit card. The sum of payment_value per order equals the total paid.
+    columns:
+      order_id: Joins to orders.order_id.
+      payment_sequential: Sequence number of the payment within the order. Part of the primary key with order_id.
+      payment_type: One of credit_card, boleto (Brazilian bank slip), voucher, debit_card, not_defined.
+      payment_installments: Number of installments the customer chose (credit card).
+      payment_value: Amount paid with this payment method, in BRL, including freight.
+
+  - name: order_reviews
+    description: >
+      Customer reviews sent after delivery. Most orders have one review; a few have more.
+      review_id is not unique in the source data, so review_pk is the primary key.
+    columns:
+      review_pk: Surrogate primary key.
+      review_id: Source review id. NOT unique.
+      order_id: Joins to orders.order_id.
+      review_score: Integer 1 to 5. 5 is best.
+      review_comment_title: Optional title, Portuguese, often NULL.
+      review_comment_message: Optional free-text comment, Portuguese, often NULL.
+      review_creation_date: When the review survey was sent to the customer.
+      review_answer_timestamp: When the customer answered the survey.
+
+  - name: products
+    description: >
+      One row per product. Category names here are in Portuguese; join to product_categories
+      for English names.
+    columns:
+      product_id: Primary key.
+      product_category_name: Portuguese category name. Joins to product_categories. Can be NULL.
+      product_name_length: Number of characters in the product name.
+      product_description_length: Number of characters in the product description.
+      product_photos_qty: Number of product photos in the listing.
+      product_weight_g: Weight in grams.
+      product_length_cm: Length in centimeters.
+      product_height_cm: Height in centimeters.
+      product_width_cm: Width in centimeters.
+
+  - name: product_categories
+    description: >
+      English names for product categories. Needed for ANY question grouped by category,
+      such as top categories by revenue or review score by category. Some categories have no
+      English translation, so use COALESCE(english name, portuguese name) and a LEFT JOIN.
+    columns:
+      product_category_name: Portuguese category name, primary key.
+      product_category_name_english: English category name, e.g. bed_bath_table, health_beauty.
+
+  - name: sellers
+    description: One row per seller on the Olist marketplace.
+    columns:
+      seller_id: Primary key. Joins to order_items.seller_id.
+      seller_zip_code_prefix: First 5 digits of the seller's zip code.
+      seller_city: Seller city name, lowercase, Portuguese.
+      seller_state: Two-letter Brazilian state code of the seller.
+
+  - name: geolocation_zip
+    description: >
+      One row per zip code prefix with average coordinates. Pre-aggregated from the raw
+      geolocation file to avoid join fan-out. Only needed for map or distance questions.
+    columns:
+      zip_prefix: First 5 digits of a zip code, primary key.
+      lat: Average latitude of the zip prefix.
+      lng: Average longitude of the zip prefix.
+      city: Most common city name for the zip prefix, lowercase, Portuguese.
+      state: Two-letter Brazilian state code for the zip prefix.
+
+  - name: summary_cohort_retention
+    description: >
+      PRECOMPUTED. Monthly customer cohort retention. Use this table for ANY retention or
+      cohort question instead of computing from orders. A cohort is the month of a person's
+      first purchase (by customer_unique_id), excluding canceled and unavailable orders.
+      Combinations with zero returning customers have NO row. For overall retention across
+      cohorts, NEVER use AVG(retention_pct); weight by cohort size:
+      SUM(active_customers) / SUM(cohort_size), counting cohorts with no row as 0.
+    columns:
+      cohort_month: First day of the month of first purchase.
+      months_since_first: Months after the cohort month. 0 means the first-purchase month (always 100%).
+      active_customers: Number of cohort members who ordered in that month.
+      cohort_size: Total customers in the cohort. Same value on every row of a cohort.
+      retention_pct: 100 * active_customers / cohort_size for this one cohort.
+
+  - name: summary_order_funnel
+    description: >
+      PRECOMPUTED. Monthly order funnel: purchased, approved, shipped to carrier, delivered,
+      reviewed. Use this for funnel, conversion, fulfillment-rate, or stage-duration questions.
+      Includes canceled orders at the purchased stage. Each *_pct column is relative to the
+      previous stage. Percentages are NULL where the previous stage is 0.
+    columns:
+      purchase_month: First day of the purchase month. Primary key.
+      purchased: Orders placed that month.
+      approved: Orders with payment approved.
+      shipped: Orders handed to the carrier.
+      delivered: Orders delivered to the customer.
+      reviewed: Orders with at least one review.
+      approved_pct: approved / purchased * 100.
+      shipped_pct: shipped / approved * 100.
+      delivered_pct: delivered / shipped * 100.
+      reviewed_pct: reviewed / delivered * 100. Can slightly exceed 100 because undelivered orders can be reviewed.
+      median_days_purchase_to_approval: Median days from purchase to payment approval.
+      median_days_approval_to_carrier: Median days from approval to carrier handoff.
+      median_days_carrier_to_delivery: Median days from carrier handoff to customer delivery.
+
+  - name: summary_seller_rolling
+    description: >
+      PRECOMPUTED. One row per seller per week with sales that week, plus rolling 4-calendar-week
+      averages. Use this for seller trend, seller performance over time, or weekly seller
+      questions. Revenue excludes canceled orders and freight. Weeks with no sales have no row.
+    columns:
+      seller_id: Joins to sellers.seller_id.
+      week_start: Monday of the week.
+      weekly_revenue: Sum of item price for this seller this week, BRL.
+      weekly_orders: Number of distinct orders containing this seller's items this week.
+      avg_review_score: Average review score of this week's orders. NULL if none were reviewed.
+      rolling_4w_revenue_avg: Average weekly revenue over the last 4 calendar weeks, counting weeks with no sales as 0.
+      rolling_4w_orders: Total orders over the last 4 calendar weeks.
+      rolling_4w_avg_review_score: Average review score over the last 4 calendar weeks.
+
+relationships:
+  - orders.customer_id = customers.customer_id
+  - order_items.order_id = orders.order_id
+  - order_items.product_id = products.product_id
+  - order_items.seller_id = sellers.seller_id
+  - order_payments.order_id = orders.order_id
+  - order_reviews.order_id = orders.order_id
+  - products.product_category_name = product_categories.product_category_name
+  - customers.customer_zip_code_prefix = geolocation_zip.zip_prefix
+  - sellers.seller_zip_code_prefix = geolocation_zip.zip_prefix
+  - summary_seller_rolling.seller_id = sellers.seller_id

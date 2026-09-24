@@ -20,3 +20,7 @@ Right: weighted by cohort size, with missing rows counted as 0, gives 0.48%.
 Cause: tiny 2016 cohorts (a few customers) count equally with 7,000-customer cohorts,
 and cohorts with zero returners have no row, so they were silently skipped.
 Fix: SUM(active_customers) / SUM(cohort_size) over all cohorts old enough.
+
+#5
+Retrieval: "Top 10 categories by revenue" missed product_categories and the category glossary term.
+Fix: companion-table expansion (products <-> product_categories, order_items -> orders) + richer aliases.

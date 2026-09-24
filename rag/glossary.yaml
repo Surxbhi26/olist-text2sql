@@ -1,0 +1,135 @@
+# Business definitions for terms that are ambiguous in natural language.
+# Each term becomes one retrievable chunk.
+
+terms:
+  - term: Customer
+    aliases: [buyer, shopper, unique customer, people]
+    definition: >
+      A real person, identified by customers.customer_unique_id. customer_id is per order
+      and must not be used to count people.
+    sql_hint: COUNT(DISTINCT c.customer_unique_id) FROM orders o JOIN customers c ON c.customer_id = o.customer_id
+
+  - term: Today / current date / recent
+    aliases: [last 90 days, last month, this year, recently, latest]
+    definition: >
+      The data ends in 2018, so relative dates are anchored to the latest purchase in the
+      data, not to NOW() or CURRENT_DATE. Data after Aug 2018 is very sparse.
+    sql_hint: (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+
+  - term: Valid order
+    aliases: [completed order, real order, successful order]
+    definition: >
+      Unless the question says otherwise, exclude orders with order_status canceled or
+      unavailable from sales, revenue, and customer metrics.
+    sql_hint: WHERE o.order_status NOT IN ('canceled', 'unavailable')
+
+  - term: Revenue
+    aliases: [sales, turnover, earnings, income]
+    definition: >
+      Sum of order_items.price on valid orders, excluding freight. This is the default
+      meaning of revenue and sales.
+    sql_hint: SUM(oi.price) FROM order_items oi JOIN orders o ON o.order_id = oi.order_id WHERE o.order_status NOT IN ('canceled', 'unavailable')
+
+  - term: GMV
+    aliases: [gross merchandise value, total order value, total including shipping]
+    definition: Revenue plus freight. Sum of order_items.price + order_items.freight_value on valid orders.
+    sql_hint: SUM(oi.price + oi.freight_value)
+
+  - term: Average order value
+    aliases: [AOV, average basket, average ticket, average spend per order]
+    definition: Revenue divided by the number of distinct valid orders.
+    sql_hint: SUM(oi.price) / COUNT(DISTINCT oi.order_id)
+
+  - term: Active customer
+    aliases: [active users, active buyers]
+    definition: >
+      A customer_unique_id with at least one valid order in the 90 days before the latest
+      purchase date in the data.
+    sql_hint: o.order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+
+  - term: Repeat customer
+    aliases: [returning customer, loyal customer, came back, ordered again, repeat rate]
+    definition: >
+      A customer_unique_id with 2 or more distinct valid orders. Repeat-customer rate is
+      repeat customers divided by all customers. It is very low on Olist (about 3%).
+    sql_hint: GROUP BY c.customer_unique_id HAVING COUNT(DISTINCT o.order_id) >= 2
+
+  - term: Retention
+    aliases: [cohort retention, retention rate, churn, month 1 retention]
+    definition: >
+      Share of a cohort (customers by first purchase month) who order again N months later.
+      Use summary_cohort_retention. For overall retention, weight by cohort size
+      (SUM(active_customers) / SUM(cohort_size)) and count cohorts with no row as 0.
+      Never average retention_pct across cohorts; tiny cohorts distort it about 10x.
+    sql_hint: summary_cohort_retention, weighted by cohort_size
+
+  - term: Late delivery
+    aliases: [delayed, late, missed delivery date, on time]
+    definition: >
+      A delivered order whose order_delivered_customer_date is after
+      order_estimated_delivery_date. Only delivered orders count in the denominator of a
+      late-delivery rate.
+    sql_hint: o.order_delivered_customer_date > o.order_estimated_delivery_date AND o.order_delivered_customer_date IS NOT NULL
+
+  - term: Delivery time
+    aliases: [shipping time, days to deliver, delivery speed, lead time]
+    definition: Days from order_purchase_timestamp to order_delivered_customer_date, for delivered orders only.
+    sql_hint: EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_purchase_timestamp)) / 86400
+
+  - term: Delivery delay
+    aliases: [days late, delay vs estimate]
+    definition: >
+      Days between actual and estimated delivery. Positive means late, negative means early.
+    sql_hint: EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400
+
+  - term: Region / state
+    aliases: [location, where, geography, region]
+    definition: >
+      Brazilian two-letter state codes. Customer location comes from customers.customer_state;
+      seller location from sellers.seller_state. Use customer_state unless the question is about sellers.
+    sql_hint: customers.customer_state
+
+  - term: Product category
+    aliases: [category, product type, department]
+    definition: >
+      Use the English name from product_categories, falling back to the Portuguese name when
+      no translation exists.
+    sql_hint: COALESCE(pc.product_category_name_english, p.product_category_name) FROM products p LEFT JOIN product_categories pc ON pc.product_category_name = p.product_category_name
+
+  - term: Customer satisfaction
+    aliases: [review score, rating, satisfaction, NPS, happy customers]
+    definition: Average order_reviews.review_score (1 to 5). A score of 4 or 5 counts as positive, 1 or 2 as negative.
+    sql_hint: AVG(r.review_score) FROM order_reviews r
+
+  - term: Payment method share
+    aliases: [payment type, how customers pay, credit card share, boleto]
+    definition: >
+      Share of payment_value by payment_type, unless the question asks about number of
+      orders, in which case count distinct order_id per payment_type.
+    sql_hint: SUM(op.payment_value) GROUP BY op.payment_type
+
+  - term: Funnel / conversion
+    aliases: [fulfillment rate, conversion, drop-off, order pipeline, stages]
+    definition: >
+      Olist has no cart or checkout data. The funnel is purchased, approved, shipped,
+      delivered, reviewed. Use summary_order_funnel.
+    sql_hint: summary_order_funnel
+
+  - term: Seller performance
+    aliases: [top sellers, seller trend, best sellers, seller revenue over time]
+    definition: >
+      For totals, aggregate order_items by seller_id on valid orders. For trends over time
+      or weekly questions, use summary_seller_rolling.
+    sql_hint: summary_seller_rolling for trends; order_items GROUP BY seller_id for totals
+
+  - term: Rounding
+    aliases: [round, decimals, two decimal places]
+    definition: >
+      Postgres ROUND(x, 2) only works on numeric. Columns stored as double precision
+      (including averages and percentages in summary tables) must be cast first.
+    sql_hint: ROUND(AVG(x)::numeric, 2)
+
+  - term: Safe division
+    aliases: [rate, percentage, ratio, share]
+    definition: Guard every division against a zero denominator.
+    sql_hint: 100.0 * a / NULLIF(b, 0)
