@@ -5,13 +5,14 @@ GROUP BY order_status
 ORDER BY order_count DESC;
 
 -- ### Q02 | easy | What are the top 10 product categories by revenue?
-SELECT pc.product_category_name_english AS category, ROUND(SUM(oi.price), 2) AS revenue
+SELECT COALESCE(pc.product_category_name_english, p.product_category_name) AS category,
+       ROUND(SUM(oi.price), 2) AS revenue
 FROM order_items oi
 JOIN orders o ON o.order_id = oi.order_id
 JOIN products p ON p.product_id = oi.product_id
-JOIN product_categories pc ON pc.product_category_name = p.product_category_name
-WHERE o.order_status <> 'canceled'
-GROUP BY pc.product_category_name_english
+LEFT JOIN product_categories pc ON pc.product_category_name = p.product_category_name
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY 1
 ORDER BY revenue DESC
 LIMIT 10;
 

@@ -12,19 +12,23 @@ terms:
   - term: Today / current date / recent
     aliases: [last 90 days, last month, this year, recently, latest]
     definition: >
-      The data ends in 2018, so relative dates are anchored to the latest purchase in the
-      data, not to NOW() or CURRENT_DATE. Data after Aug 2018 is very sparse.
+      The data ends in 2018, so relative dates are anchored to the latest date in the data,
+      not to NOW() or CURRENT_DATE. For orders, use MAX(order_purchase_timestamp). For a
+      PRECOMPUTED summary table, anchor to that table's own latest date, e.g.
+      (SELECT MAX(week_start) FROM summary_seller_rolling), because the final weeks of order
+      data are almost all canceled orders and contain no real sales.
     sql_hint: (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
 
   - term: Valid order
     aliases: [completed order, real order, successful order]
     definition: >
       Unless the question says otherwise, exclude orders with order_status canceled or
-      unavailable from sales, revenue, and customer metrics.
-    sql_hint: WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      unavailable from sales, revenue, and customer metrics. Do NOT apply this filter to
+      questions about order statuses, cancellations, or counts of all orders.
+    sql_hint: "ONLY for revenue, sales, and customer metrics: WHERE o.order_status NOT IN ('canceled', 'unavailable'). For questions about order status or all orders: no status filter."
 
   - term: Revenue
-    aliases: [sales, turnover, earnings, income]
+    aliases: [sales, turnover, earnings, income, by revenue, top by revenue, highest revenue, most sales, best selling]
     definition: >
       Sum of order_items.price on valid orders, excluding freight. This is the default
       meaning of revenue and sales.
@@ -90,7 +94,7 @@ terms:
     sql_hint: customers.customer_state
 
   - term: Product category
-    aliases: [category, product type, department]
+    aliases: [category, categories, top categories, by category, category revenue, product type, department]
     definition: >
       Use the English name from product_categories, falling back to the Portuguese name when
       no translation exists.

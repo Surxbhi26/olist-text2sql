@@ -1,5 +1,9 @@
 from functools import lru_cache
 
+from dotenv import load_dotenv
+
+load_dotenv()  # so HF_HUB_OFFLINE=1 in .env takes effect before the model loads
+
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 DIM = 384
 
