@@ -40,4 +40,10 @@ Fix: companion-table expansion (products <-> product_categories, order_items -> 
   SELECT seller_id, ROUND(AVG(weekly_revenue)::numeric, 2) AS avg_weekly_revenue
   FROM summary_seller_rolling
   WHERE week_start > (SELECT w FROM last) - INTERVAL '4 weeks'
-  GROUP BY seller_id ORDER BY avg_weekly_revenue DESC;  
+  GROUP BY seller_id ORDER BY avg_weekly_revenue DESC; 
+
+  #8
+  - Multi-turn (3b): rewrites were correct on both follow-ups, but turn 2 copied few-shot Q18
+  (top-1 category per state, RANK ... rnk = 1) instead of modifying turn 1's SQL.
+  Turn 3 inherited it (1 row instead of SP's top 10): error propagation across turns.
+  Mitigation tried: 1 few-shot example on follow-ups so the previous SQL dominates. 

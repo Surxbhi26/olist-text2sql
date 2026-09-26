@@ -98,14 +98,19 @@ def select_examples(question, k=3, exclude=()):
     return pool[:k]
 
 
-def build_prompt(question, context, examples=(), previous_attempts=()):
+def build_prompt(question, context, examples=(), previous_attempts=(), previous_turn=None):
     """Return (system, user) messages.
-    previous_attempts: list of {"sql", "error"} for the self-correction loop (Phase 5)."""
+    previous_attempts: list of {"sql", "error"} for the self-correction loop (Phase 5).
+    previous_turn: the last conversation turn, when the question is a follow-up (Phase 6)."""
     parts = [context]
     if examples:
         parts.append("### Examples")
         for e in examples:
             parts.append(f"Question: {e['question']}\nSQL:\n{e['sql']}")
+    if previous_turn is not None:
+        parts.append("### Previous question in this conversation. The new question is a follow-up: "
+                     "modify this SQL to answer it instead of starting from scratch.")
+        parts.append(f"Question: {previous_turn.standalone}\nSQL:\n{previous_turn.sql}")
     if previous_attempts:
         parts.append("### Previous attempts that failed. Fix the problem; do not repeat the mistake.")
         for i, a in enumerate(previous_attempts, 1):

@@ -13,6 +13,7 @@ from agent.executor import execute
 from agent.llm import chat, model_name
 from agent.prompt import build_prompt, extract_sql, select_examples
 from agent.retriever import format_context, retrieve
+from agent.session import Session, Turn, looks_like_followup, rewrite
 from agent.validator import validate
 
 load_dotenv()
@@ -44,9 +45,10 @@ EMPTY_RESULT_MSG = ("Query ran but returned 0 rows. If an empty result is plausi
                     "return the same query unchanged. Otherwise fix the filters, joins, or date range.")
 
 
-def generate_and_run(question, context, examples, previous_attempts=(), temperature=0.0):
+def generate_and_run(question, context, examples, previous_attempts=(), temperature=0.0,
+                     previous_turn=None):
     """One attempt: prompt the LLM, validate its SQL, execute it."""
-    system, user = build_prompt(question, context, examples, previous_attempts)
+    system, user = build_prompt(question, context, examples, previous_attempts, previous_turn)
     llm = chat(system, user, temperature=temperature)
     sql = extract_sql(llm["text"])
     attempt = {"sql": sql, "raw": llm["text"], "llm_s": llm["latency_s"],
@@ -85,17 +87,27 @@ def _feedback(sql, error, failed_sqls):
 
 
 def ask(question, max_attempts=MAX_ATTEMPTS, k_examples=3, exclude_examples=(),
-        strategy="rag+retry", session_id=None, log=True):
-    """Answer a question, retrying on validation errors, execution errors, and (once) empty results."""
+        strategy="rag+retry", session=None, log=True):
+    """Answer a question, retrying on validation errors, execution errors, and (once) empty results.
+    With a Session, follow-ups are rewritten into standalone questions and build on the previous SQL."""
     start = time.time()
-    retrieved = retrieve(question)
+
+    # Phase 6: resolve follow-ups before retrieval, so retrieval sees the full question.
+    standalone, rewrite_s, previous_turn = question, 0.0, None
+    if session is not None and session.turns and looks_like_followup(question):
+        standalone, rewrite_s = rewrite(question, session.turns)
+        previous_turn = session.turns[-1]
+
+    retrieved = retrieve(standalone)
     context = format_context(retrieved)
-    examples = select_examples(question, k=k_examples, exclude=exclude_examples)
+    k = 1 if previous_turn is not None else k_examples
+    examples = select_examples(standalone, k=k, exclude=exclude_examples)
 
     attempts, feedback, failed_sqls = [], [], set()
     for n in range(1, max_attempts + 1):
         temp = 0.0 if n == 1 else RETRY_TEMPERATURE
-        a = generate_and_run(question, context, examples, feedback, temperature=temp)
+        a = generate_and_run(standalone, context, examples, feedback, temperature=temp,
+                             previous_turn=previous_turn)
         a["n"], a["temperature"] = n, temp
         attempts.append(a)
 
@@ -119,6 +131,9 @@ def ask(question, max_attempts=MAX_ATTEMPTS, k_examples=3, exclude_examples=(),
 
     result = {
         "question": question,
+        "standalone": standalone,
+        "rewritten": standalone != question,
+        "rewrite_s": rewrite_s,
         "tables": [t["name"] for t in retrieved["tables"]],
         "examples": [e["id"] for e in examples],
         "attempts": attempts,
@@ -126,8 +141,11 @@ def ask(question, max_attempts=MAX_ATTEMPTS, k_examples=3, exclude_examples=(),
         "success": final["stage"] == "ok",
         "total_s": round(time.time() - start, 2),
     }
+    if session is not None and result["success"]:
+        session.add(Turn(question=question, standalone=standalone, sql=final["sql"],
+                         columns=final["columns"], row_count=len(final["rows"])))
     if log:
-        _log(result, strategy, session_id or str(uuid.uuid4()))
+        _log(result, strategy, session.id if session is not None else str(uuid.uuid4()))
     return result
 
 
@@ -161,7 +179,7 @@ def _log(result, strategy, session_id):
                     """INSERT INTO agent_log (session_id, strategy, model, question, attempt, is_final,
                            stage, sql, error, row_count, llm_s, input_tokens, output_tokens)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    [(session_id, strategy, model_name(), result["question"], a["n"],
+                    [(session_id, strategy, model_name(), result["standalone"], a["n"],
                       a is result["final"], a["stage"], a["sql"], a["error"], len(a["rows"]),
                       a["llm_s"], a["input_tokens"], a["output_tokens"])
                      for a in result["attempts"]])
@@ -171,6 +189,8 @@ def _log(result, strategy, session_id):
 
 def print_result(r):
     print(f"Question: {r['question']}")
+    if r.get("rewritten"):
+        print(f"Rewritten: {r['standalone']}  ({r['rewrite_s']}s)")
     print(f"Tables:   {', '.join(r['tables'])}")
     print(f"Examples: {', '.join(r['examples']) or 'none'}")
 
@@ -180,7 +200,7 @@ def print_result(r):
         print(f"\n--- Attempt {a['n']} ({a['llm_s']}s, temp {a.get('temperature', 0)}): {status}{extra}")
         print(a["sql"])
 
-        f = r["final"]
+    f = r["final"]
     print("\n=== Result ===")
     if not r["success"]:
         print(f"FAILED after {len(r['attempts'])} attempts: {f['error']}")
@@ -198,7 +218,8 @@ def print_result(r):
     tin = sum(a["input_tokens"] for a in r["attempts"])
     tout = sum(a["output_tokens"] for a in r["attempts"])
     print(f"\nTotal {r['total_s']}s, {len(r['attempts'])} attempt(s), tokens in/out {tin}/{tout}")
-    
+
+
 if __name__ == "__main__":
     q = " ".join(sys.argv[1:]) or "How many orders are there per order status?"
     print_result(ask(q))
