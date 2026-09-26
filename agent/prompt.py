@@ -15,8 +15,9 @@ Rules:
 2. Exactly one SELECT statement. WITH (CTEs) is allowed. Never write INSERT, UPDATE, DELETE, DROP, CREATE, ALTER or any other statement that changes data.
 3. Use ONLY tables and columns listed in the context. Never invent a column or table name.
 4. Follow the business definitions in the context exactly (revenue, valid order, repeat customer, etc.).
-   Exclude canceled/unavailable orders only for sales, revenue, and customer metrics. Questions about
-   order statuses, cancellations, or counts of all orders must include every status.
+   Exclude canceled/unavailable orders ONLY for money metrics (revenue, sales, GMV, order value),
+   using NOT IN ('canceled', 'unavailable'). Counts of orders, customers, sellers, statuses, reviews,
+   and delivery metrics use all orders with no status filter.
 5. Tables marked PRECOMPUTED already contain the aggregation. Prefer them when they answer the question.
 6. The data ends in 2018. For relative dates ("last 90 days", "recent"), anchor to (SELECT MAX(order_purchase_timestamp) FROM orders), never NOW() or CURRENT_DATE.
 7. Use ROUND(x::numeric, 2) for rounding, and NULLIF(denominator, 0) for every division.

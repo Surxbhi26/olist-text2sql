@@ -78,7 +78,6 @@ questions:
           SELECT c.customer_unique_id
           FROM orders o
           JOIN customers c ON c.customer_id = o.customer_id
-          WHERE o.order_status NOT IN ('canceled', 'unavailable')
           GROUP BY c.customer_unique_id
           HAVING COUNT(DISTINCT o.order_id) >= 2
       ) t

@@ -17,15 +17,15 @@ terms:
       PRECOMPUTED summary table, anchor to that table's own latest date, e.g.
       (SELECT MAX(week_start) FROM summary_seller_rolling), because the final weeks of order
       data are almost all canceled orders and contain no real sales.
-    sql_hint: (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+    sql_hint: "Only when the question asks for a recent period: >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL 'N days'"
 
   - term: Valid order
-    aliases: [completed order, real order, successful order]
+    aliases: [completed order, real order, successful order, sales filter]
     definition: >
-      Unless the question says otherwise, exclude orders with order_status canceled or
-      unavailable from sales, revenue, and customer metrics. Do NOT apply this filter to
-      questions about order statuses, cancellations, or counts of all orders.
-    sql_hint: "ONLY for revenue, sales, and customer metrics: WHERE o.order_status NOT IN ('canceled', 'unavailable'). For questions about order status or all orders: no status filter."
+      For MONEY metrics only (revenue, sales, GMV, average order value), exclude orders with
+      order_status canceled or unavailable. Counts of orders, customers, sellers, statuses,
+      reviews, and delivery metrics use ALL orders with no status filter.
+    sql_hint: "Money metrics only: WHERE o.order_status NOT IN ('canceled', 'unavailable'). Never use <> 'canceled' alone."
 
   - term: Revenue
     aliases: [sales, turnover, earnings, income, by revenue, top by revenue, highest revenue, most sales, best selling]
@@ -47,15 +47,15 @@ terms:
   - term: Active customer
     aliases: [active users, active buyers]
     definition: >
-      A customer_unique_id with at least one valid order in the 90 days before the latest
-      purchase date in the data.
+      A customer_unique_id with at least one order in the 90 days before the latest
+      purchase date in the data. No status filter.
     sql_hint: o.order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
 
   - term: Repeat customer
     aliases: [returning customer, loyal customer, came back, ordered again, repeat rate]
     definition: >
-      A customer_unique_id with 2 or more distinct valid orders. Repeat-customer rate is
-      repeat customers divided by all customers. It is very low on Olist (about 3%).
+      A customer_unique_id with 2 or more distinct orders (no status filter). Repeat-customer
+      rate is repeat customers divided by all customers. It is very low on Olist (about 3%).
     sql_hint: GROUP BY c.customer_unique_id HAVING COUNT(DISTINCT o.order_id) >= 2
 
   - term: Retention

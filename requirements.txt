@@ -9,4 +9,4 @@ anthropic
 sqlglot
 sentence-transformers
 pyyaml
-python-dotenv
+python-dotenvrequests

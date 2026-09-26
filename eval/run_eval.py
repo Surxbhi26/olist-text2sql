@@ -98,11 +98,30 @@ def main():
     ap.add_argument("--strategies", default="D,B,A")
     ap.add_argument("--ids", default=None, help="comma-separated question ids")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--reuse", default=None,
+                    help="copy results for strategies NOT being run from this earlier run (e.g. A,B)")
     args = ap.parse_args()
 
     run = args.run or re.sub(r"[^A-Za-z0-9_.-]", "_", model_name())
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     path = RESULTS_DIR / f"{run}.jsonl"
+    strategies = [s.strip().upper() for s in args.strategies.split(",")]
+    if args.reuse:
+        src = RESULTS_DIR / f"{args.reuse}.jsonl"
+        existing = set()
+        if path.exists():
+            existing = {(json.loads(l)["id"], json.loads(l)["strategy"])
+                        for l in path.read_text(encoding="utf-8").splitlines() if l.strip()}
+        copied = 0
+        with path.open("a", encoding="utf-8") as out:
+            for line in src.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    rec = json.loads(line)
+                    if rec["strategy"] not in strategies and (rec["id"], rec["strategy"]) not in existing:
+                        out.write(json.dumps(rec) + "\n")
+                        copied += 1
+        print(f"Copied {copied} results from '{args.reuse}' for strategies other than {strategies}")
+
     done = set()
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -116,7 +135,6 @@ def main():
         questions = [q for q in questions if q["id"] in wanted]
     if args.limit:
         questions = questions[:args.limit]
-    strategies = [s.strip().upper() for s in args.strategies.split(",")]
 
     todo = [(s, q) for s in strategies for q in questions if (q["id"], s) not in done]
     print(f"Run '{run}' -> {path}")

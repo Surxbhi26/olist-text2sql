@@ -1,5 +1,6 @@
 """Retrieve the schema and glossary chunks most relevant to a question."""
 import os
+import re
 import sys
 
 import psycopg
@@ -23,13 +24,37 @@ COMPANIONS = {
 }
 
 
+# Business rules a small model over-applies (eval finding: 30% of failures). They are only
+# retrieved when the question actually uses the term.
+_MONEY = re.compile(r"\b(revenue|sales|sell|sold|selling|gmv|merchandise|order value|aov|"
+                    r"basket|ticket|spend|spent|earn|earned|income|turnover|money)\b", re.I)
+
+GATED_TERMS = {
+    # Money rules carry the status filter in their SQL hints; only retrieve them for money questions.
+    "Valid order": _MONEY,
+    "Revenue": _MONEY,
+    "GMV": _MONEY,
+    "Average order value": _MONEY,
+    "Today / current date / recent": re.compile(r"\b(last|recent|recently|latest|past|current|today|"
+                                                r"this (year|month|week)|ago|so far)\b", re.I),
+    "Active customer": re.compile(r"\bactive\b", re.I),
+}
+
+
+def _allowed(term, question):
+    rule = GATED_TERMS.get(term)
+    return rule is None or bool(rule.search(question))
+
+
 def retrieve(question, k_tables=4, k_terms=3):
     """Top tables and glossary terms are retrieved separately so neither crowds out the other.
     Companion tables and the join map are always added, because join paths matter most."""
     vec = to_pgvector(embed([question])[0])
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         tables = conn.execute(_QUERY, (vec, "table", k_tables)).fetchall()
-        terms = conn.execute(_QUERY, (vec, "glossary", k_terms)).fetchall()
+        # Fetch extra candidates, drop gated rules the question doesn't use, keep the top k_terms.
+        candidates = conn.execute(_QUERY, (vec, "glossary", k_terms + len(GATED_TERMS))).fetchall()
+        terms = [t for t in candidates if _allowed(t[0], question)][:k_terms]
         joins = conn.execute("SELECT content FROM schema_chunks WHERE kind = 'joins'").fetchone()
 
         names = {n for n, _, _ in tables}

@@ -1,0 +1,1789 @@
+strategy,id,difficulty,category,question,error,pred_rows,gold_rows,pred_sql,failure_type
+A,Q01,easy,ground_truth,How many orders are there for each order status?,,7,8,"SELECT 
+    os.order_status AS order_status,
+    COUNT(*) AS order_count
+FROM 
+    orders os
+JOIN 
+    order_items oi ON os.order_id = oi.order_id
+WHERE 
+    os.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    os.order_status
+ORDER BY 
+    order_count DESC
+LIMIT 1000",
+A,Q02,easy,ground_truth,What are the top 10 product categories by revenue?,column p.category_name does not exist,0,10,"WITH TopCategories AS (
+    SELECT 
+        p.category_name,
+        SUM(olp.total_price) AS total_revenue
+    FROM 
+        products p
+    JOIN 
+        order_items oi ON p.product_id = oi.product_id
+    JOIN 
+        order_payments op ON oi.order_id = op.order_id
+    JOIN 
+        orders o ON oi.order_id = o.order_id
+    WHERE 
+        o.order_purchase_timestamp >= '2018-01-01'
+        AND o.order_purchase_timestamp < '2019-01-01'
+        AND o.order_status = 'delivered'
+    GROUP BY 
+        p.category_name
+    ORDER BY 
+        total_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    category_name,
+    total_revenue
+FROM 
+    TopCategories
+LIMIT 1000",
+A,Q03,easy,ground_truth,What is the average review score?,"relation ""reviews"" does not exist",0,1,"SELECT AVG(review_score) AS average_review_score
+FROM reviews
+LIMIT 1000",
+A,Q04,easy,ground_truth,Which 10 states have the most unique customers?,"column o.seller_id does not exist HINT: Perhaps you meant to reference the column ""s.seller_id"".",0,10,"SELECT 
+    s.state AS state_name,
+    COUNT(DISTINCT o.customer_id) AS unique_customers
+FROM 
+    orders o
+JOIN 
+    sellers s ON o.seller_id = s.seller_id
+WHERE 
+    o.order_purchase_timestamp >= '2018-01-01'
+GROUP BY 
+    s.state
+ORDER BY 
+    unique_customers DESC
+LIMIT 10",
+A,Q05,easy,ground_truth,How many sellers are there in each state?,"column o.seller_id does not exist HINT: Perhaps you meant to reference the column ""s.seller_id"".",0,23,"SELECT 
+    s.state AS state_name,
+    COUNT(DISTINCT s.seller_id) AS seller_count
+FROM 
+    sellers s
+JOIN 
+    orders o ON s.seller_id = o.seller_id
+WHERE 
+    o.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    s.state
+ORDER BY 
+    seller_count DESC
+LIMIT 1000",
+A,Q06,easy,ground_truth,What is the average item price and average freight value?,"relation ""items"" does not exist",0,1,"SELECT 
+    AVG(i.price) AS average_item_price,
+    AVG(o.freight_value) AS average_freight_value
+FROM 
+    items i
+JOIN 
+    orders o ON i.order_id = o.order_id
+WHERE 
+    o.order_purchase_timestamp <= '2018-12-31'
+LIMIT 1000",
+A,Q07,medium,ground_truth,What percentage of customers are repeat customers?,DISTINCT is not implemented for window functions,0,1,"WITH RecentOrders AS (
+    SELECT customer_id
+    FROM orders
+    WHERE order_purchase_timestamp >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '1 year'
+),
+RepeatCustomers AS (
+    SELECT customer_id
+    FROM orders
+    WHERE order_purchase_timestamp >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '1 year'
+    GROUP BY customer_id
+    HAVING COUNT(DISTINCT order_id) > 1
+)
+SELECT 
+    ROUND(CAST(COUNT(DISTINCT customer_id) AS REAL) * 100 / COUNT(DISTINCT customer_id) OVER (), 2) AS repeat_customer_percentage
+FROM RepeatCustomers
+LIMIT 1000",
+A,Q08,medium,ground_truth,"What is the average delivery delay in days versus the estimated date, by customer state?",column o.customer_state does not exist,0,27,"WITH DeliveryDelays AS (
+    SELECT 
+        o.customer_state,
+        ROUND((o.order_delivered_at - o.order_purchase_timestamp) / INTERVAL '1 day', 2) AS delivery_delay,
+        o.order_purchase_timestamp,
+        o.order_delivered_at
+    FROM 
+        orders o
+    WHERE 
+        o.order_status = 'delivered'
+        AND o.order_purchase_timestamp <= (SELECT MAX(order_purchase_timestamp) FROM orders)
+),
+EstimatedDelays AS (
+    SELECT 
+        o.customer_state,
+        ROUND((o.order_estimated_delivery_date - o.order_purchase_timestamp) / INTERVAL '1 day', 2) AS estimated_delay,
+        o.order_purchase_timestamp,
+        o.order_estimated_delivery_date
+    FROM 
+        orders o
+    WHERE 
+        o.order_status = 'delivered'
+        AND o.order_purchase_timestamp <= (SELECT MAX(order_purchase_timestamp) FROM orders)
+)
+SELECT 
+    dd.customer_state,
+    AVG(dd.delivery_delay) AS average_delivery_delay,
+    AVG(ed.estimated_delay) AS average_estimated_delay
+FROM 
+    DeliveryDelays dd
+JOIN 
+    EstimatedDelays ed ON dd.customer_state = ed.customer_state
+GROUP BY 
+    dd.customer_state
+ORDER BY 
+    average_delivery_delay ASC
+LIMIT 1000",
+A,Q09,medium,ground_truth,What is the share of each payment type by month?,"column ""payment_type"" does not exist",0,90,"WITH monthly_payments AS (
+    SELECT 
+        EXTRACT(MONTH FROM order_purchase_timestamp) AS month,
+        payment_type,
+        COUNT(*) AS payment_count
+    FROM 
+        orders
+    WHERE 
+        order_purchase_timestamp <= (SELECT MAX(order_purchase_timestamp) FROM orders)
+        AND payment_status = 'paid'
+    GROUP BY 
+        month, payment_type
+),
+total_payments AS (
+    SELECT 
+        EXTRACT(MONTH FROM order_purchase_timestamp) AS month,
+        COUNT(*) AS total_payment_count
+    FROM 
+        orders
+    WHERE 
+        order_purchase_timestamp <= (SELECT MAX(order_purchase_timestamp) FROM orders)
+        AND payment_status = 'paid'
+    GROUP BY 
+        month
+)
+SELECT 
+    mp.month,
+    mp.payment_type,
+    ROUND((mp.payment_count::numeric / tp.total_payment_count::numeric) * 100, 2) AS payment_share
+FROM 
+    monthly_payments mp
+JOIN 
+    total_payments tp ON mp.month = tp.month
+ORDER BY 
+    mp.month, payment_share DESC
+LIMIT 1000",
+A,Q10,medium,ground_truth,What is the monthly revenue and its month-over-month growth?,"column ""order_value"" does not exist",0,24,"WITH MonthlyRevenue AS (
+    SELECT 
+        EXTRACT(MONTH FROM order_purchase_timestamp) AS month,
+        SUM(order_value) AS revenue
+    FROM 
+        orders
+    WHERE 
+        order_status = 'delivered'
+        AND order_purchase_timestamp >= '2018-01-01'
+        AND order_purchase_timestamp < '2019-01-01'
+    GROUP BY 
+        month
+),
+MonthlyGrowth AS (
+    SELECT 
+        month,
+        revenue,
+        LAG(revenue) OVER (ORDER BY month) AS prev_month_revenue,
+        (revenue - prev_month_revenue) / prev_month_revenue * 100 AS growth_percentage
+    FROM 
+        MonthlyRevenue
+)
+SELECT 
+    month,
+    revenue,
+    growth_percentage
+FROM 
+    MonthlyGrowth
+ORDER BY 
+    month
+LIMIT 1000",
+A,Q11,medium,ground_truth,What is the average order value?,"column ""total_value"" does not exist",0,1,"SELECT AVG(total_value) AS average_order_value
+FROM orders
+WHERE order_status = 'delivered'
+LIMIT 1000",
+A,Q12,medium,ground_truth,"What is the average delivery time in days from purchase to delivery, by customer state?","relation ""deliveries"" does not exist",0,27,"SELECT 
+    o.state AS customer_state,
+    ROUND(AVG(d.delivery_date - o.order_purchase_timestamp)::numeric, 2) AS average_delivery_time
+FROM 
+    orders o
+JOIN 
+    deliveries d ON o.order_id = d.order_id
+WHERE 
+    o.order_status = 'delivered'
+    AND o.order_purchase_timestamp <= (SELECT MAX(order_purchase_timestamp) FROM orders)
+GROUP BY 
+    o.state
+ORDER BY 
+    average_delivery_time
+LIMIT 1000",
+A,Q13,medium,ground_truth,Who are the top 10 sellers by revenue?,"column o.seller_id does not exist HINT: Perhaps you meant to reference the column ""oi.seller_id"".",0,10,"WITH TopSellers AS (
+    SELECT 
+        o.seller_id,
+        SUM(oi.price * oi.quantity) AS total_revenue
+    FROM 
+        orders o
+    JOIN 
+        order_items oi ON o.order_id = oi.order_id
+    WHERE 
+        o.order_purchase_timestamp <= '2018-12-31'
+        AND o.order_status = 'delivered'
+    GROUP BY 
+        o.seller_id
+    ORDER BY 
+        total_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    seller_id,
+    total_revenue
+FROM 
+    TopSellers
+LIMIT 1000",
+A,Q14,medium,ground_truth,"Which 10 product categories have the lowest average review score, among categories with at least 100 reviews?","relation ""reviews"" does not exist",0,10,"WITH CategoryReviews AS (
+    SELECT 
+        p.product_category_name,
+        AVG(r.review_score) AS avg_review_score
+    FROM 
+        products p
+    JOIN 
+        reviews r ON p.product_id = r.product_id
+    GROUP BY 
+        p.product_category_name
+    HAVING 
+        COUNT(r.review_id) >= 100
+),
+LowestAverageReviews AS (
+    SELECT 
+        product_category_name,
+        avg_review_score
+    FROM 
+        CategoryReviews
+    ORDER BY 
+        avg_review_score ASC
+    LIMIT 10
+)
+SELECT 
+    product_category_name,
+    avg_review_score
+FROM 
+    LowestAverageReviews
+ORDER BY 
+    avg_review_score ASC
+LIMIT 1000",
+A,Q15,hard,ground_truth,Which sellers have above-average revenue but below-average review scores?,"column o.seller_id does not exist HINT: Perhaps you meant to reference the column ""s.seller_id"".",0,200,"WITH seller_revenue AS (
+    SELECT 
+        s.seller_id,
+        SUM(o.price * o.quantity) AS total_revenue
+    FROM 
+        sellers s
+    JOIN 
+        orders o ON s.seller_id = o.seller_id
+    WHERE 
+        o.order_purchase_timestamp <= '2018-12-31'
+    GROUP BY 
+        s.seller_id
+),
+seller_reviews AS (
+    SELECT 
+        s.seller_id,
+        AVG(r.review_score) AS average_review_score
+    FROM 
+        sellers s
+    JOIN 
+        reviews r ON s.seller_id = r.seller_id
+    WHERE 
+        r.review_score IS NOT NULL
+    GROUP BY 
+        s.seller_id
+)
+SELECT 
+    sr.seller_id,
+    sr.total_revenue,
+    sr.average_review_score
+FROM 
+    seller_revenue sr
+JOIN 
+    seller_reviews sr2 ON sr.seller_id = sr2.seller_id
+WHERE 
+    sr.total_revenue > (SELECT AVG(total_revenue) FROM seller_revenue)
+    AND sr.average_review_score < (SELECT AVG(average_review_score) FROM seller_reviews)
+LIMIT 1000",
+A,Q16,hard,ground_truth,"On average, how many days pass between a customer's first and second order?","function datediff(timestamp without time zone, timestamp without time zone) does not exist HINT: No function matches the given name and argument types. You might need to add explicit type casts.",0,1,"WITH FirstOrder AS (
+    SELECT customer_id, MIN(order_purchase_timestamp) AS first_order_date
+    FROM orders
+    WHERE order_status = 'delivered'
+    GROUP BY customer_id
+),
+SecondOrder AS (
+    SELECT customer_id, MIN(order_purchase_timestamp) AS second_order_date
+    FROM orders
+    WHERE order_status = 'delivered'
+    AND order_purchase_timestamp > (SELECT first_order_date FROM FirstOrder fo WHERE fo.customer_id = orders.customer_id)
+    GROUP BY customer_id
+),
+DaysBetween AS (
+    SELECT 
+        COALESCE(DATEDIFF(second_order_date, first_order_date), 0) AS days_between
+    FROM SecondOrder
+    JOIN FirstOrder ON SecondOrder.customer_id = FirstOrder.customer_id
+)
+SELECT AVG(days_between) AS average_days_between_first_and_second_order
+FROM DaysBetween
+LIMIT 1000",
+A,Q17,hard,ground_truth,"Which 10 category and customer state combinations have the highest late-delivery rate, with at least 50 delivered orders?",column o.category_id does not exist,0,10,"WITH late_deliveries AS (
+    SELECT 
+        o.category_id,
+        c.state,
+        COUNT(*) AS delivered_orders,
+        SUM(CASE WHEN o.order_status = 'delivered' THEN 1 ELSE 0 END) AS delivered_count,
+        SUM(CASE WHEN o.order_status = 'delivered' AND o.delayed_delivery = TRUE THEN 1 ELSE 0 END) AS late_delivered_count
+    FROM 
+        orders o
+    JOIN 
+        customers c ON o.customer_id = c.customer_id
+    WHERE 
+        o.order_purchase_timestamp <= '2018-12-31'
+        AND o.order_status = 'delivered'
+        AND o.delayed_delivery = TRUE
+    GROUP BY 
+        o.category_id, c.state
+    HAVING 
+        COUNT(*) >= 50
+),
+late_delivery_rates AS (
+    SELECT 
+        category_id,
+        state,
+        late_delivered_count,
+        delivered_count,
+        CAST(late_delivered_count AS REAL) / delivered_count AS late_delivery_rate
+    FROM 
+        late_deliveries
+)
+SELECT 
+    category_id,
+    state,
+    late_delivery_rate
+FROM 
+    late_delivery_rates
+ORDER BY 
+    late_delivery_rate DESC
+LIMIT 10",
+A,Q18,hard,ground_truth,What is the top revenue category in each customer state?,column o.price does not exist,0,27,"WITH CustomerStateRevenue AS (
+    SELECT 
+        c.customer_state,
+        SUM(o.price * o.quantity) AS total_revenue
+    FROM 
+        customers c
+    JOIN 
+        orders o ON c.customer_id = o.customer_id
+    WHERE 
+        o.order_purchase_timestamp <= '2018-12-31'
+        AND o.status = 'delivered'
+    GROUP BY 
+        c.customer_state
+),
+RankedCategories AS (
+    SELECT 
+        customer_state,
+        total_revenue,
+        RANK() OVER (PARTITION BY customer_state ORDER BY total_revenue DESC) AS revenue_rank
+    FROM 
+        CustomerStateRevenue
+)
+SELECT 
+    customer_state,
+    total_revenue
+FROM 
+    RankedCategories
+WHERE 
+    revenue_rank = 1
+ORDER BY 
+    total_revenue DESC
+LIMIT 1000",
+A,Q19,hard,ground_truth,How many active customers are there? (active = ordered in the last 90 days of the dataset),,1,1,"SELECT COUNT(DISTINCT customer_id) AS active_customers
+FROM orders
+WHERE order_purchase_timestamp >= NOW() - INTERVAL '90 days'
+LIMIT 1000",
+A,Q20,hard,ground_truth,How many customers gave their first order a review score of 1 or 2 and never ordered again?,"relation ""reviews"" does not exist",0,1,"SELECT COUNT(DISTINCT customer_id) AS first_review_1_or_2_never_ordered_again
+FROM (
+    SELECT customer_id, order_id, review_score
+    FROM reviews
+    WHERE review_score IN (1, 2)
+) AS first_reviews
+LEFT JOIN (
+    SELECT customer_id, order_id
+    FROM orders
+) AS recent_orders ON first_reviews.customer_id = recent_orders.customer_id
+WHERE recent_orders.order_id IS NULL
+LIMIT 1000",
+A,Q21,hard,summary_table,What is the overall customer retention rate for months 0-6 after first purchase?,,1,7,"WITH FirstPurchase AS (
+    SELECT customer_id, MIN(order_purchase_timestamp) AS first_purchase_timestamp
+    FROM orders
+    WHERE order_status = 'delivered'
+      AND order_purchase_timestamp <= '2018-06-30'
+    GROUP BY customer_id
+),
+Retention AS (
+    SELECT fp.customer_id,
+           CASE
+               WHEN fp.first_purchase_timestamp + INTERVAL '6 months' <= '2018-06-30' THEN 'Yes'
+               ELSE 'No'
+           END AS retained
+    FROM FirstPurchase fp
+)
+SELECT COUNT(CASE WHEN retained = 'Yes' THEN 1 END) / COUNT(*) AS customer_retention_rate
+FROM Retention
+LIMIT 1000",
+A,N01,medium,glossary,What is our total GMV?,"column ""total_value"" does not exist",0,1,"SELECT SUM(total_value) AS total_gmv
+FROM orders
+WHERE order_status = 'delivered'
+  AND order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+LIMIT 1000",
+A,N02,medium,glossary,What share of delivered orders arrived late?,"column ""order_delivered_timestamp"" does not exist",0,1,"WITH delivered_orders AS (
+    SELECT order_id
+    FROM orders
+    WHERE order_status = 'delivered'
+),
+late_delivered_orders AS (
+    SELECT order_id
+    FROM delivered_orders
+    WHERE order_delivered_timestamp > order_estimated_delivery_timestamp
+),
+total_delivered_orders AS (
+    SELECT COUNT(order_id) AS total_delivered
+    FROM delivered_orders
+),
+total_orders AS (
+    SELECT COUNT(order_id) AS total_orders
+    FROM orders
+)
+SELECT 
+    ROUND(CAST(COUNT(late_delivered_orders.order_id) AS numeric) / total_delivered.total_delivered * 100, 2) AS late_delivery_percentage
+FROM late_delivered_orders
+JOIN total_delivered ON late_delivered_orders.order_id = total_delivered.order_id
+JOIN total_orders ON total_delivered.order_id = total_orders.order_id
+LIMIT 1000",
+A,N03,medium,glossary,What is the late delivery rate in each customer state?,"relation ""customerstate"" does not exist",0,27,"WITH LatestOrder AS (
+    SELECT customer_id, MAX(order_purchase_timestamp) AS last_order_date
+    FROM orders
+    WHERE order_status = 'delivered'
+    GROUP BY customer_id
+),
+LateDeliveries AS (
+    SELECT 
+        l.customer_id,
+        l.last_order_date,
+        o.order_purchase_timestamp,
+        CASE 
+            WHEN o.order_purchase_timestamp > l.last_order_date THEN 'Late'
+            ELSE 'On Time'
+        END AS delivery_status
+    FROM LatestOrder l
+    JOIN orders o ON l.customer_id = o.customer_id
+    WHERE o.order_status = 'delivered'
+),
+CustomerStateDeliveries AS (
+    SELECT 
+        csc.customer_id,
+        csc.state,
+        COUNT(CASE WHEN ld.delivery_status = 'Late' THEN 1 END) AS late_deliveries,
+        COUNT(CASE WHEN ld.delivery_status = 'On Time' THEN 1 END) AS on_time_deliveries
+    FROM CustomerState csc
+    JOIN LateDeliveries ld ON csc.customer_id = ld.customer_id
+    GROUP BY csc.customer_id, csc.state
+)
+SELECT 
+    state,
+    ROUND((late_deliveries::numeric / (late_deliveries + on_time_deliveries)) * 100, 2) AS late_delivery_rate
+FROM CustomerStateDeliveries
+ORDER BY late_delivery_rate DESC
+LIMIT 1000",
+A,N04,medium,glossary,How many customers have bought more than once?,,1,1,"SELECT COUNT(DISTINCT customer_id) AS repeat_customers
+FROM orders
+WHERE order_status = 'delivered'
+  AND order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) - INTERVAL '90 days' FROM orders)
+LIMIT 1000",
+A,N05,medium,glossary,What is the average order value for customers in RJ?,"relation ""order_addresses"" does not exist",0,1,"SELECT 
+    AVG(oa.total_price) AS average_order_value
+FROM 
+    orders o
+JOIN 
+    order_items oi ON o.order_id = oi.order_id
+JOIN 
+    order_addresses oa ON o.order_id = oa.order_id
+WHERE 
+    oa.state = 'RJ'
+GROUP BY 
+    oa.state
+LIMIT 1000",
+A,N07,medium,glossary,What percentage of total payment value was paid by credit card?,"relation ""payments"" does not exist",0,1,"SELECT 
+    ROUND((SUM(CASE WHEN payment_type = 'credit_card' THEN payment_value ELSE 0 END) / SUM(payment_value)) * 100, 2) AS credit_card_percentage
+FROM 
+    payments
+LIMIT 1000",
+A,N08,easy,glossary,What percentage of reviews are negative (1 or 2 stars)?,"relation ""reviews"" does not exist",0,1,"SELECT 
+    COUNT(CASE WHEN review_score < 3 THEN 1 END) * 100.0 / COUNT(*) AS negative_review_percentage
+FROM 
+    reviews
+LIMIT 1000",
+A,N09,medium,glossary,What was the revenue in the last 90 days of data?,"missing FROM-clause entry for table ""olp""",0,1,"SELECT 
+    SUM(olp.total_price) AS total_revenue
+FROM 
+    orders o
+JOIN 
+    order_payments op ON o.order_id = op.order_id
+JOIN 
+    order_items oi ON o.order_id = oi.order_id
+JOIN 
+    products p ON oi.product_id = p.product_id
+WHERE 
+    o.order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+    AND o.order_status = 'delivered'
+    AND op.payment_status = 'paid'
+    AND p.price > 0
+LIMIT 1000",
+A,N10,medium,glossary,Which customer state has the slowest average delivery time?,column o.customer_state does not exist,0,1,"WITH DeliveryTimes AS (
+    SELECT 
+        o.customer_state,
+        AVG(o.order_purchase_timestamp - o.order_delivered_timestamp) AS avg_delivery_time
+    FROM 
+        orders o
+    WHERE 
+        o.order_status = 'delivered'
+        AND o.order_purchase_timestamp <= '2018-12-31'
+    GROUP BY 
+        o.customer_state
+),
+SortedDeliveryTimes AS (
+    SELECT 
+        customer_state,
+        avg_delivery_time,
+        ROW_NUMBER() OVER (ORDER BY avg_delivery_time ASC) AS delivery_time_rank
+    FROM 
+        DeliveryTimes
+)
+SELECT 
+    customer_state,
+    avg_delivery_time
+FROM 
+    SortedDeliveryTimes
+WHERE 
+    delivery_time_rank = 1
+LIMIT 1000",
+A,N11,medium,summary_table,What was the payment approval rate in each month of 2017?,"column ""payment_status"" does not exist",0,12,"WITH MonthlyPayments AS (
+    SELECT 
+        EXTRACT(YEAR FROM order_purchase_timestamp) AS year,
+        EXTRACT(MONTH FROM order_purchase_timestamp) AS month,
+        COUNT(CASE WHEN payment_status = 'approved' THEN 1 ELSE NULL END) AS approved_count,
+        COUNT(*) AS total_count
+    FROM 
+        orders
+    WHERE 
+        order_purchase_timestamp >= '2017-01-01' AND order_purchase_timestamp < '2018-01-01'
+    GROUP BY 
+        year, month
+)
+SELECT 
+    year,
+    month,
+    ROUND((approved_count::numeric / total_count) * 100, 2) AS payment_approval_rate
+FROM 
+    MonthlyPayments
+ORDER BY 
+    year, month
+LIMIT 1000",
+A,N12,medium,summary_table,How many orders were delivered to customers for each purchase month in 2018?,,10,10,"SELECT 
+    EXTRACT(YEAR FROM order_purchase_timestamp) AS purchase_year,
+    EXTRACT(MONTH FROM order_purchase_timestamp) AS purchase_month,
+    COUNT(*) AS order_count
+FROM 
+    orders
+WHERE 
+    order_purchase_timestamp >= '2018-01-01' AND order_purchase_timestamp < '2019-01-01'
+GROUP BY 
+    purchase_year, purchase_month
+ORDER BY 
+    purchase_year, purchase_month
+LIMIT 1000",
+A,N13,hard,summary_table,What is the overall month 1 retention rate?,"column ""customer_id"" does not exist",0,1,"WITH last_month_orders AS (
+    SELECT order_purchase_timestamp
+    FROM orders
+    WHERE order_purchase_timestamp >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+      AND order_purchase_timestamp < DATE_TRUNC('month', CURRENT_DATE)
+),
+retained_customers AS (
+    SELECT customer_id
+    FROM last_month_orders
+    INTERSECT
+    SELECT customer_id
+    FROM orders
+    WHERE order_purchase_timestamp >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '2 months')
+      AND order_purchase_timestamp < DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+),
+total_customers AS (
+    SELECT customer_id
+    FROM orders
+    WHERE order_purchase_timestamp >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '2 months')
+      AND order_purchase_timestamp < DATE_TRUNC('month', CURRENT_DATE)
+)
+SELECT 
+    ROUND(CAST(COUNT(DISTINCT retained_customers.customer_id) AS numeric) / COUNT(DISTINCT total_customers.customer_id) * 100, 2) AS retention_rate
+FROM retained_customers
+JOIN total_customers ON retained_customers.customer_id = total_customers.customer_id
+LIMIT 1000",
+A,N14,easy,time,Which month had the most orders?,,1,1,"SELECT 
+    EXTRACT(MONTH FROM order_purchase_timestamp) AS month,
+    COUNT(*) AS order_count
+FROM 
+    orders
+WHERE 
+    order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+GROUP BY 
+    EXTRACT(MONTH FROM order_purchase_timestamp)
+ORDER BY 
+    order_count DESC
+LIMIT 1",
+A,N15,hard,summary_table,Which 5 sellers had the highest average weekly revenue over the last 4 weeks of seller data?,"column ""seller_id"" does not exist",0,5,"WITH WeeklyRevenue AS (
+    SELECT 
+        seller_id,
+        EXTRACT(WEEK FROM order_purchase_timestamp) AS week,
+        SUM(order_value) AS total_revenue
+    FROM 
+        orders
+    WHERE 
+        order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) - INTERVAL '4 weeks' FROM orders)
+        AND order_status = 'delivered'
+        AND order_status != 'canceled'
+        AND order_status != 'unavailable'
+    GROUP BY 
+        seller_id, week
+),
+AverageWeeklyRevenue AS (
+    SELECT 
+        seller_id,
+        AVG(total_revenue) AS avg_weekly_revenue
+    FROM 
+        WeeklyRevenue
+    GROUP BY 
+        seller_id
+)
+SELECT 
+    seller_id,
+    avg_weekly_revenue
+FROM 
+    AverageWeeklyRevenue
+ORDER BY 
+    avg_weekly_revenue DESC
+LIMIT 5",
+A,N16,easy,aggregation,What is the average number of installments for each payment type?,"relation ""payments"" does not exist",0,5,"SELECT 
+    payment_type,
+    AVG(installments) AS avg_installments
+FROM 
+    payments
+GROUP BY 
+    payment_type
+LIMIT 1000",
+A,N17,easy,aggregation,Which 5 cities have the most unique customers?,column c.city does not exist,0,5,"SELECT 
+    c.city,
+    COUNT(DISTINCT o.customer_id) AS unique_customers
+FROM 
+    customers c
+JOIN 
+    orders o ON c.customer_id = o.customer_id
+WHERE 
+    o.order_purchase_timestamp >= '2018-01-01'
+GROUP BY 
+    c.city
+ORDER BY 
+    unique_customers DESC
+LIMIT 5",
+A,N18,easy,time,What was the total revenue in each year?,"column ""order_value"" does not exist",0,3,"SELECT 
+    EXTRACT(YEAR FROM order_purchase_timestamp) AS year,
+    SUM(order_value) AS total_revenue
+FROM 
+    orders
+WHERE 
+    order_status = 'delivered'
+    AND order_purchase_timestamp <= (SELECT MAX(order_purchase_timestamp) FROM orders)
+GROUP BY 
+    EXTRACT(YEAR FROM order_purchase_timestamp)
+ORDER BY 
+    year
+LIMIT 1000",
+A,N19,medium,aggregation,What percentage of orders contain more than one item?,"column ""quantity"" does not exist",0,1,"SELECT 
+    COUNT(*) AS total_orders,
+    COUNT(CASE WHEN quantity > 1 THEN 1 END) AS orders_with_multiple_items,
+    ROUND((COUNT(CASE WHEN quantity > 1 THEN 1 END) * 100.0 / COUNT(*)), 2) AS percentage_with_multiple_items
+FROM 
+    orders
+JOIN 
+    order_items ON orders.order_id = order_items.order_id
+LIMIT 1000",
+B,Q02,easy,ground_truth,What are the top 10 product categories by revenue?,"SQL parse error: Expecting ). Line 3, Col: 37.",0,10,"SELECT 
+    p.product_category_name,
+    SUM(oi.price + oi.f freight_value) AS total_revenue
+FROM 
+    order_items oi
+JOIN 
+    products p ON oi.product_id = p.product_id
+WHERE 
+    oi.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    p.product_category_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10",
+B,Q07,medium,ground_truth,What percentage of customers are repeat customers?,"column ""customer_unique_id"" does not exist",0,1,"SELECT 
+    ROUND(CAST(COUNT(DISTINCT customer_id) AS numeric) * 100 / COUNT(DISTINCT customer_unique_id), 2) AS repeat_customer_percentage
+FROM 
+    orders
+WHERE 
+    order_status = 'delivered'
+LIMIT 1000",
+B,Q08,medium,ground_truth,"What is the average delivery delay in days versus the estimated date, by customer state?","function datediff(timestamp without time zone, timestamp without time zone) does not exist HINT: No function matches the given name and argument types. You might need to add explicit type casts.",0,27,"SELECT 
+    c.customer_state,
+    ROUND(AVG(DATEDIFF(order_delivered_customer_date, order_estimated_delivery_date))::numeric, 2) AS average_delivery_delay
+FROM 
+    customers c
+JOIN 
+    orders o ON c.customer_id = o.customer_id
+WHERE 
+    o.order_status = 'delivered'
+GROUP BY 
+    c.customer_state
+ORDER BY 
+    average_delivery_delay
+LIMIT 1000",
+B,Q09,medium,ground_truth,What is the share of each payment type by month?,"column reference ""order_id"" is ambiguous",0,90,"SELECT 
+    EXTRACT(YEAR FROM order_purchase_timestamp) AS year,
+    EXTRACT(MONTH FROM order_purchase_timestamp) AS month,
+    payment_type,
+    COUNT(order_id) AS order_count,
+    COUNT(order_id) * 100.0 / SUM(COUNT(order_id)) OVER (PARTITION BY EXTRACT(YEAR FROM order_purchase_timestamp), EXTRACT(MONTH FROM order_purchase_timestamp)) AS payment_type_share
+FROM 
+    order_payments
+JOIN 
+    orders ON order_payments.order_id = orders.order_id
+WHERE 
+    order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    year, month, payment_type
+ORDER BY 
+    year, month, payment_type_share DESC
+LIMIT 1000",
+B,Q10,medium,ground_truth,What is the monthly revenue and its month-over-month growth?,"syntax error at or near ""1""",0,24,"WITH monthly_revenue AS (
+    SELECT 
+        DATE_TRUNC('month', order_purchase_timestamp) AS month,
+        SUM(price + freight_value) AS revenue
+    FROM 
+        orders
+    JOIN 
+        order_items ON orders.order_id = order_items.order_id
+    WHERE 
+        order_status = 'delivered'
+        AND order_purchase_timestamp <= '2018-12-31'
+    GROUP BY 
+        month
+),
+previous_month_revenue AS (
+    SELECT 
+        DATE_TRUNC('month', order_purchase_timestamp) AS month,
+        SUM(price + freight_value) AS revenue
+    FROM 
+        orders
+    JOIN 
+        order_items ON orders.order_id = order_items.order_id
+    WHERE 
+        order_status = 'delivered'
+        AND order_purchase_timestamp <= '2018-12-31'
+        AND DATE_TRUNC('month', order_purchase_timestamp) = DATE_TRUNC('month', DATE_SUB('month', INTERVAL 1 MONTH, '2018-12-31'))
+    GROUP BY 
+        month
+)
+SELECT 
+    m.month,
+    m.revenue AS current_month_revenue,
+    COALESCE(pm.revenue, 0) AS previous_month_revenue,
+    ROUND((m.revenue - COALESCE(pm.revenue, 0)) / COALESCE(pm.revenue, 1) * 100, 2) AS growth_percentage
+FROM 
+    monthly_revenue m
+LEFT JOIN 
+    previous_month_revenue pm ON m.month = pm.month
+ORDER BY 
+    m.month
+LIMIT 1000",
+B,Q11,medium,ground_truth,What is the average order value?,,1,1,"SELECT AVG(price) AS average_order_value
+FROM order_items
+LIMIT 1000",
+B,Q12,medium,ground_truth,"What is the average delivery time in days from purchase to delivery, by customer state?","function datediff(timestamp without time zone, timestamp without time zone) does not exist HINT: No function matches the given name and argument types. You might need to add explicit type casts.",0,27,"SELECT 
+    c.customer_state,
+    AVG(DATEDIFF(order_delivered_customer_date, order_purchase_timestamp)) AS average_delivery_time_days
+FROM 
+    orders o
+JOIN 
+    customers c ON o.customer_id = c.customer_id
+WHERE 
+    o.order_status = 'delivered'
+GROUP BY 
+    c.customer_state
+ORDER BY 
+    average_delivery_time_days
+LIMIT 1000",
+B,Q13,medium,ground_truth,Who are the top 10 sellers by revenue?,column oi.order_purchase_timestamp does not exist,0,10,"SELECT s.seller_id, s.seller_city, s.seller_state, SUM(oi.price + oi.freight_value) AS total_revenue
+FROM order_items oi
+JOIN sellers s ON oi.seller_id = s.seller_id
+WHERE oi.order_purchase_timestamp <= '2018-12-31'
+GROUP BY s.seller_id, s.seller_city, s.seller_state
+ORDER BY total_revenue DESC
+LIMIT 10",
+B,Q14,medium,ground_truth,"Which 10 product categories have the lowest average review score, among categories with at least 100 reviews?",,10,10,"WITH product_reviews AS (
+    SELECT 
+        p.product_category_name,
+        COUNT(r.review_pk) AS review_count,
+        AVG(r.review_score) AS avg_review_score
+    FROM 
+        products p
+    JOIN 
+        order_items oi ON p.product_id = oi.product_id
+    JOIN 
+        order_reviews r ON oi.order_id = r.order_id
+    GROUP BY 
+        p.product_category_name
+),
+filtered_reviews AS (
+    SELECT 
+        product_category_name,
+        review_count,
+        avg_review_score
+    FROM 
+        product_reviews
+    WHERE 
+        review_count >= 100
+)
+SELECT 
+    product_category_name,
+    avg_review_score
+FROM 
+    filtered_reviews
+ORDER BY 
+    avg_review_score ASC
+LIMIT 10",
+B,Q15,hard,ground_truth,Which sellers have above-average revenue but below-average review scores?,"SQL parse error: Required keyword: 'expression' missing for <class 'sqlglot.expressions.core.Or'>. Line 3, Col: 14.",0,200,"SELECT s.seller_id, s.seller_city, s.seller_state, 
+       SUM(oi.price + oi.freight_value) AS total_revenue,
+       AVG(or.review_score) AS avg_review_score
+FROM sellers s
+JOIN order_items oi ON s.seller_id = oi.seller_id
+JOIN orders o ON oi.order_id = o.order_id
+LEFT JOIN order_reviews or ON o.order_id = or.order_id
+WHERE o.order_purchase_timestamp <= '2018-12-31'
+GROUP BY s.seller_id, s.seller_city, s.seller_state
+HAVING SUM(oi.price + oi.freight_value) > (SELECT AVG(total_revenue) FROM (SELECT SUM(oi.price + oi.freight_value) AS total_revenue
+                                                  FROM sellers s
+                                                  JOIN order_items oi ON s.seller_id = oi.seller_id
+                                                  JOIN orders o ON oi.order_id = o.order_id
+                                                  WHERE o.order_purchase_timestamp <= '2018-12-31'
+                                                  GROUP BY s.seller_id) AS revenue_summary)
+  AND AVG(or.review_score) < (SELECT AVG(avg_review_score) FROM (SELECT AVG(or.review_score) AS avg_review_score
+                                                  FROM sellers s
+                                                  JOIN order_items oi ON s.seller_id = oi.seller_id
+                                                  JOIN orders o ON oi.order_id = o.order_id
+                                                  LEFT JOIN order_reviews or ON o.order_id = or.order_id
+                                                  WHERE o.order_purchase_timestamp <= '2018-12-31'
+                                                  GROUP BY s.seller_id) AS review_summary)",
+B,Q16,hard,ground_truth,"On average, how many days pass between a customer's first and second order?",cannot cast type interval to numeric,0,1,"WITH first_order AS (
+    SELECT customer_id, MIN(order_purchase_timestamp) AS first_order_date
+    FROM orders
+    GROUP BY customer_id
+),
+second_order AS (
+    SELECT customer_id, MIN(order_purchase_timestamp) AS second_order_date
+    FROM orders
+    WHERE order_purchase_timestamp > (SELECT first_order_date FROM first_order)
+    GROUP BY customer_id
+),
+days_between AS (
+    SELECT 
+        COALESCE(first_order_date, '1900-01-01') AS first_order_date,
+        COALESCE(second_order_date, '1900-01-01') AS second_order_date,
+        (second_order_date - first_order_date) AS days_between
+    FROM first_order
+    LEFT JOIN second_order ON first_order.customer_id = second_order.customer_id
+)
+SELECT 
+    AVG(days_between::numeric) AS average_days_between
+FROM days_between
+WHERE days_between IS NOT NULL
+LIMIT 1000",
+B,Q17,hard,ground_truth,"Which 10 category and customer state combinations have the highest late-delivery rate, with at least 50 delivered orders?",column o.customer_state does not exist,0,10,"WITH late_deliveries AS (
+    SELECT 
+        o.customer_state,
+        p.product_category_name,
+        COUNT(o.order_id) AS delivered_orders
+    FROM 
+        orders o
+    JOIN 
+        order_items oi ON o.order_id = oi.order_id
+    JOIN 
+        products p ON oi.product_id = p.product_id
+    WHERE 
+        o.order_status = 'delivered'
+        AND o.order_delivered_customer_date IS NULL
+        AND o.order_purchase_timestamp < '2018-01-01'
+    GROUP BY 
+        o.customer_state, p.product_category_name
+),
+category_state_deliveries AS (
+    SELECT 
+        cs.customer_state,
+        cs.product_category_name,
+        ld.delivered_orders
+    FROM 
+        late_deliveries ld
+    JOIN 
+        customers cs ON ld.customer_state = cs.customer_state
+),
+category_state_deliveries_with_count AS (
+    SELECT 
+        cs.customer_state,
+        cs.product_category_name,
+        ld.delivered_orders,
+        COUNT(*) OVER (PARTITION BY cs.customer_state, cs.product_category_name) AS total_delivered_orders
+    FROM 
+        category_state_deliveries cs
+    JOIN 
+        late_deliveries ld ON cs.customer_state = ld.customer_state AND cs.product_category_name = ld.product_category_name
+),
+top_category_state_deliveries AS (
+    SELECT 
+        customer_state,
+        product_category_name,
+        delivered_orders,
+        total_delivered_orders
+    FROM 
+        category_state_deliveries_with_count
+    WHERE 
+        total_delivered_orders >= 50
+    ORDER BY 
+        delivered_orders DESC
+    LIMIT 10
+)
+SELECT 
+    customer_state,
+    product_category_name,
+    delivered_orders,
+    total_delivered_orders
+FROM 
+    top_category_state_deliveries
+ORDER BY 
+    delivered_orders DESC
+LIMIT 1000",
+B,Q18,hard,ground_truth,What is the top revenue category in each customer state?,"column pc.product_id does not exist HINT: Perhaps you meant to reference the column ""oi.product_id"".",0,27,"SELECT 
+    c.customer_state,
+    pc.product_category_name,
+    SUM(oi.price) AS total_revenue
+FROM 
+    customers c
+JOIN 
+    orders o ON c.customer_id = o.customer_id
+JOIN 
+    order_items oi ON o.order_id = oi.order_id
+JOIN 
+    product_categories pc ON oi.product_id = pc.product_id
+WHERE 
+    o.order_status = 'delivered'
+    AND o.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    c.customer_state, pc.product_category_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 1",
+B,Q19,hard,ground_truth,How many active customers are there? (active = ordered in the last 90 days of the dataset),,1,1,"SELECT COUNT(DISTINCT customer_id) AS active_customers
+FROM orders
+WHERE order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+LIMIT 1000",
+B,Q20,hard,ground_truth,How many customers gave their first order a review score of 1 or 2 and never ordered again?,,1,1,"SELECT COUNT(DISTINCT c.customer_id) AS first_review_1_or_2_never_ordered_again
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_reviews rv ON o.order_id = rv.order_id
+WHERE rv.review_score IN (1, 2)
+  AND o.order_status = 'delivered'
+  AND o.order_approved_at < (SELECT MAX(order_purchase_timestamp) FROM orders)
+  AND o.order_id NOT IN (
+    SELECT order_id
+    FROM orders
+    WHERE order_approved_at > (SELECT MAX(order_purchase_timestamp) FROM orders)
+  )
+LIMIT 1000",
+B,Q21,hard,summary_table,What is the overall customer retention rate for months 0-6 after first purchase?,"column ""customer_id"" does not exist",0,7,"WITH CohortRetention AS (
+    SELECT 
+        cohort_month,
+        months_since_first,
+        COUNT(DISTINCT customer_id) AS active_customers,
+        COUNT(DISTINCT customer_id) OVER (PARTITION BY cohort_month) AS cohort_size,
+        ROUND(COUNT(DISTINCT customer_id) OVER (PARTITION BY cohort_month) / COUNT(DISTINCT customer_id) OVER (PARTITION BY cohort_month) * 100, 2) AS retention_pct
+    FROM 
+        summary_cohort_retention
+    WHERE 
+        cohort_month BETWEEN '2018-01-01' AND '2018-06-30'
+),
+MonthRetention AS (
+    SELECT 
+        cohort_month,
+        months_since_first,
+        retention_pct
+    FROM 
+        CohortRetention
+    WHERE 
+        months_since_first BETWEEN 0 AND 6
+)
+SELECT 
+    cohort_month,
+    retention_pct
+FROM 
+    MonthRetention
+ORDER BY 
+    cohort_month
+LIMIT 1000",
+B,N01,medium,glossary,What is our total GMV?,,1,1,"SELECT SUM(price + freight_value) AS total_gmv
+FROM order_items
+LIMIT 1000",
+B,N03,medium,glossary,What is the late delivery rate in each customer state?,,27,27,"SELECT 
+    c.customer_state,
+    ROUND(COUNT(CASE WHEN o.order_status = 'delivered_late' THEN 1 ELSE NULL END) * 100.0 / COUNT(o.order_id), 2) AS late_delivery_rate
+FROM 
+    customers c
+JOIN 
+    orders o ON c.customer_id = o.customer_id
+WHERE 
+    o.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    c.customer_state
+ORDER BY 
+    late_delivery_rate DESC
+LIMIT 1000",
+B,N04,medium,glossary,How many customers have bought more than once?,,1,1,"SELECT COUNT(DISTINCT customer_id) AS repeat_customers
+FROM orders
+WHERE order_status = 'delivered'
+  AND order_purchase_timestamp <= '2018-12-31'
+LIMIT 1000",
+B,N05,medium,glossary,What is the average order value for customers in RJ?,column o.price does not exist,0,1,"SELECT AVG(o.price) AS average_order_value
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE c.customer_state = 'RJ'
+LIMIT 1000",
+B,N07,medium,glossary,What percentage of total payment value was paid by credit card?,,1,1,"SELECT 
+    ROUND((SUM(CASE WHEN payment_type = 'CREDIT_CARD' THEN payment_value ELSE 0 END) / SUM(payment_value)) * 100, 2) AS credit_card_payment_percentage
+FROM 
+    order_payments
+LIMIT 1000",
+B,N09,medium,glossary,What was the revenue in the last 90 days of data?,"column ""order_purchase_timestamp"" does not exist",0,1,"SELECT SUM(price + freight_value) AS total_revenue
+FROM order_items
+WHERE order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+LIMIT 1000",
+B,N10,medium,glossary,Which customer state has the slowest average delivery time?,"missing FROM-clause entry for table ""t1""",0,1,"SELECT c.customer_state, AVG(T1.order_delivered_customer_date - T1.order_purchase_timestamp) AS avg_delivery_time
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+WHERE o.order_status = 'delivered'
+GROUP BY c.customer_state
+ORDER BY avg_delivery_time ASC
+LIMIT 1",
+B,N11,medium,summary_table,What was the payment approval rate in each month of 2017?,"column ""payment_approved_at"" does not exist",0,12,"SELECT 
+    EXTRACT(YEAR FROM order_approved_at) AS year,
+    EXTRACT(MONTH FROM order_approved_at) AS month,
+    ROUND(COUNT(CASE WHEN payment_approved_at IS NOT NULL THEN 1 ELSE NULL END) * 100.0 / COUNT(order_id), 2) AS payment_approval_rate
+FROM 
+    orders
+WHERE 
+    EXTRACT(YEAR FROM order_approved_at) = 2017
+GROUP BY 
+    EXTRACT(YEAR FROM order_approved_at),
+    EXTRACT(MONTH FROM order_approved_at)
+ORDER BY 
+    year,
+    month
+LIMIT 1000",
+B,N12,medium,summary_table,How many orders were delivered to customers for each purchase month in 2018?,,241,10,"SELECT 
+    order_purchase_timestamp::date AS purchase_month,
+    COUNT(order_id) AS delivered_orders
+FROM 
+    orders
+WHERE 
+    order_purchase_timestamp::date BETWEEN '2018-01-01' AND '2018-12-31'
+    AND order_status = 'delivered'
+GROUP BY 
+    order_purchase_timestamp::date
+ORDER BY 
+    purchase_month
+LIMIT 1000",
+B,N13,hard,summary_table,What is the overall month 1 retention rate?,,21,1,"SELECT 
+    cohort_month,
+    ROUND(active_customers::numeric / cohort_size::numeric, 2) AS retention_pct
+FROM 
+    summary_cohort_retention
+WHERE 
+    months_since_first = 1
+LIMIT 1000",
+B,N14,easy,time,Which month had the most orders?,,1,1,"SELECT order_purchase_timestamp::date AS purchase_month, COUNT(order_id) AS order_count
+FROM orders
+WHERE order_purchase_timestamp::date <= '2018-12-31'
+GROUP BY purchase_month
+ORDER BY order_count DESC
+LIMIT 1",
+B,N15,hard,summary_table,Which 5 sellers had the highest average weekly revenue over the last 4 weeks of seller data?,,0,5,"SELECT s.seller_id, AVG(s.weekly_revenue) AS avg_weekly_revenue
+FROM summary_seller_rolling s
+WHERE s.week_start >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '4 weeks'
+GROUP BY s.seller_id
+ORDER BY avg_weekly_revenue DESC
+LIMIT 5",
+B,N18,easy,time,What was the total revenue in each year?,"column ""order_purchase_timestamp"" does not exist",0,3,"SELECT 
+    EXTRACT(YEAR FROM order_purchase_timestamp) AS year,
+    SUM(price + freight_value) AS total_revenue
+FROM 
+    order_items
+GROUP BY 
+    EXTRACT(YEAR FROM order_purchase_timestamp)
+ORDER BY 
+    year
+LIMIT 1000",
+B,N19,medium,aggregation,What percentage of orders contain more than one item?,,1,1,"SELECT COUNT(order_id) * 100.0 / COUNT(DISTINCT order_id) AS multi_item_orders_pct
+FROM order_items
+LIMIT 1000",
+C,Q01,easy,ground_truth,How many orders are there for each order status?,,6,8,"SELECT order_status, COUNT(*) AS order_count
+FROM orders
+WHERE order_status NOT IN ('canceled', 'unavailable')
+GROUP BY order_status
+ORDER BY order_count DESC
+LIMIT 1000",
+C,Q04,easy,ground_truth,Which 10 states have the most unique customers?,,10,10,"SELECT c.customer_state, COUNT(DISTINCT c.customer_unique_id) AS unique_customer_count
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state
+ORDER BY unique_customer_count DESC
+LIMIT 10",
+C,Q05,easy,ground_truth,How many sellers are there in each state?,,27,23,"SELECT c.customer_state, COUNT(DISTINCT s.seller_id) AS seller_count
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN sellers s ON oi.seller_id = s.seller_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state
+ORDER BY seller_count DESC
+LIMIT 1000",
+C,Q06,easy,ground_truth,What is the average item price and average freight value?,,1000,1,"SELECT 
+    ROUND(AVG(oi.price)::numeric, 2) AS avg_item_price,
+    ROUND(AVG(oi.freight_value)::numeric, 2) AS avg_freight_value
+FROM 
+    order_items oi
+JOIN 
+    orders o ON o.order_id = oi.order_id
+WHERE 
+    o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY 
+    oi.order_id
+LIMIT 1000",
+C,Q07,medium,ground_truth,What percentage of customers are repeat customers?,,1000,1,"SELECT 
+    ROUND(100.0 * COUNT(DISTINCT c.customer_unique_id) / COUNT(DISTINCT o.customer_id), 2) AS repeat_customer_rate
+FROM 
+    orders o
+JOIN 
+    customers c ON c.customer_id = o.customer_id
+WHERE 
+    o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY 
+    c.customer_unique_id
+HAVING 
+    COUNT(DISTINCT o.order_id) >= 2
+LIMIT 1000",
+C,Q09,medium,ground_truth,What is the share of each payment type by month?,,87,90,"WITH monthly_payment_share AS (
+    SELECT DATE_TRUNC('month', o.order_purchase_timestamp)::date AS month,
+           op.payment_type,
+           SUM(op.payment_value) AS payment_value
+    FROM order_payments op
+    JOIN orders o ON o.order_id = op.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY 1, 2
+)
+SELECT month,
+       payment_type,
+       ROUND(payment_value::numeric, 2) AS payment_value,
+       ROUND(100.0 * payment_value / NULLIF(SUM(payment_value) OVER (PARTITION BY month), 0), 2) AS payment_share_pct
+FROM monthly_payment_share
+ORDER BY month, payment_type
+LIMIT 1000",
+C,Q10,medium,ground_truth,What is the monthly revenue and its month-over-month growth?,,24,24,"WITH monthly_revenue AS (
+    SELECT 
+        DATE_TRUNC('month', order_purchase_timestamp)::date AS month,
+        SUM(price) AS revenue
+    FROM 
+        order_items oi
+    JOIN 
+        orders o ON oi.order_id = o.order_id
+    WHERE 
+        o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY 
+        1
+),
+previous_month_revenue AS (
+    SELECT 
+        DATE_TRUNC('month', order_purchase_timestamp)::date AS month,
+        SUM(price) AS revenue
+    FROM 
+        order_items oi
+    JOIN 
+        orders o ON oi.order_id = o.order_id
+    WHERE 
+        o.order_status NOT IN ('canceled', 'unavailable')
+    AND DATE_TRUNC('month', order_purchase_timestamp) = DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+    GROUP BY 
+        1
+)
+SELECT 
+    mr.month,
+    mr.revenue,
+    NULLIF((mr.revenue - pm.revenue) / pm.revenue, 0) * 100 AS month_over_month_growth
+FROM 
+    monthly_revenue mr
+LEFT JOIN 
+    previous_month_revenue pm
+ON 
+    mr.month = pm.month
+ORDER BY 
+    mr.month
+LIMIT 1000",
+C,Q14,medium,ground_truth,"Which 10 product categories have the lowest average review score, among categories with at least 100 reviews?",,10,10,"SELECT COALESCE(pc.product_category_name_english, p.product_category_name) AS category,
+       AVG(r.review_score) AS avg_review_score
+FROM order_reviews r
+JOIN order_items oi ON oi.order_id = r.order_id
+JOIN products p ON p.product_id = oi.product_id
+LEFT JOIN product_categories pc ON pc.product_category_name = p.product_category_name
+WHERE r.review_score IS NOT NULL
+GROUP BY 1
+HAVING COUNT(r.review_score) >= 100
+ORDER BY avg_review_score ASC
+LIMIT 10",
+C,Q15,hard,ground_truth,Which sellers have above-average revenue but below-average review scores?,aggregate function calls cannot be nested,0,200,"SELECT s.seller_id, 
+       ROUND(SUM(oi.price), 2) AS revenue,
+       AVG(r.review_score) AS avg_review_score
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN sellers s ON s.seller_id = oi.seller_id
+LEFT JOIN order_reviews r ON r.order_id = oi.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY s.seller_id
+HAVING SUM(oi.price) > (SELECT AVG(SUM(oi.price)) FROM order_items oi
+                         JOIN orders o ON o.order_id = oi.order_id
+                         WHERE o.order_status NOT IN ('canceled', 'unavailable')
+                         GROUP BY s.seller_id)
+  AND AVG(r.review_score) < (SELECT AVG(AVG(review_score)) FROM order_reviews r
+                             JOIN order_items oi ON oi.order_id = r.order_id
+                             JOIN orders o ON o.order_id = oi.order_id
+                             WHERE o.order_status NOT IN ('canceled', 'unavailable')
+                             GROUP BY s.seller_id)
+ORDER BY revenue DESC
+LIMIT 1000",
+C,Q16,hard,ground_truth,"On average, how many days pass between a customer's first and second order?","column ""o2.order_purchase_timestamp"" must appear in the GROUP BY clause or be used in an aggregate function",0,1,"SELECT 
+    c.customer_unique_id,
+    EXTRACT(EPOCH FROM (o2.order_purchase_timestamp - o1.order_purchase_timestamp)) / 86400 AS days_between_first_and_second_order
+FROM 
+    orders o1
+JOIN 
+    orders o2 ON o1.customer_id = o2.customer_id
+JOIN 
+    customers c ON c.customer_id = o1.customer_id
+WHERE 
+    o1.order_status NOT IN ('canceled', 'unavailable') AND
+    o2.order_status NOT IN ('canceled', 'unavailable') AND
+    o1.order_id < o2.order_id
+GROUP BY 
+    c.customer_unique_id
+ORDER BY 
+    days_between_first_and_second_order ASC
+LIMIT 1",
+C,Q17,hard,ground_truth,"Which 10 category and customer state combinations have the highest late-delivery rate, with at least 50 delivered orders?","column cc.order_id does not exist HINT: Perhaps you meant to reference the column ""ld.order_id"".",0,10,"WITH late_deliveries AS (
+    SELECT o.order_id
+    FROM orders o
+    WHERE o.order_delivered_customer_date IS NOT NULL
+      AND o.order_delivered_customer_date > o.order_estimated_delivery_date
+),
+category_customer_state AS (
+    SELECT o.customer_id, c.customer_state, p.product_category_name
+    FROM orders o
+    JOIN customers c ON c.customer_id = o.customer_id
+    JOIN order_items oi ON oi.order_id = o.order_id
+    JOIN products p ON p.product_id = oi.product_id
+),
+late_delivery_counts AS (
+    SELECT cc.customer_state, cc.product_category_name, COUNT(ld.order_id) AS late_delivery_count
+    FROM category_customer_state cc
+    JOIN late_deliveries ld ON ld.order_id = cc.order_id
+    GROUP BY cc.customer_state, cc.product_category_name
+),
+top_late_delivery_categories AS (
+    SELECT lc.customer_state, lc.product_category_name, lc.late_delivery_count
+    FROM late_delivery_counts lc
+    WHERE lc.late_delivery_count >= 50
+    ORDER BY lc.late_delivery_count DESC
+    LIMIT 10
+)
+SELECT tc.customer_state, tc.product_category_name, tc.late_delivery_count
+FROM top_late_delivery_categories tc
+ORDER BY tc.late_delivery_count DESC
+LIMIT 1000",
+C,Q18,hard,ground_truth,What is the top revenue category in each customer state?,,1000,27,"SELECT c.customer_state, pc.product_category_name_english AS category, 
+       ROUND(SUM(oi.price), 2) AS revenue
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN products p ON p.product_id = oi.product_id
+LEFT JOIN product_categories pc ON pc.product_category_name = p.product_category_name
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state, pc.product_category_name_english
+ORDER BY c.customer_state, revenue DESC
+LIMIT 1000",
+C,Q19,hard,ground_truth,How many active customers are there? (active = ordered in the last 90 days of the dataset),"column ""customer_unique_id"" does not exist",0,1,"SELECT COUNT(DISTINCT customer_unique_id) AS active_customers
+FROM orders
+WHERE order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+LIMIT 1000",
+C,Q20,hard,ground_truth,How many customers gave their first order a review score of 1 or 2 and never ordered again?,,1,1,"WITH first_order_reviews AS (
+    SELECT o.customer_id, r.review_score
+    FROM orders o
+    JOIN order_reviews r ON r.order_id = o.order_id
+    WHERE r.review_score IN (1, 2)
+    GROUP BY o.customer_id, r.review_score
+),
+first_order_reviews_count AS (
+    SELECT customer_id, COUNT(*) AS review_count
+    FROM first_order_reviews
+    GROUP BY customer_id
+),
+never_ordered_again AS (
+    SELECT customer_id
+    FROM orders
+    GROUP BY customer_id
+    HAVING COUNT(DISTINCT order_id) = 1
+),
+first_order_reviews_never_ordered_again AS (
+    SELECT forc.customer_id
+    FROM first_order_reviews_count forc
+    JOIN never_ordered_again noa ON noa.customer_id = forc.customer_id
+)
+SELECT COUNT(*) AS customers
+FROM first_order_reviews_never_ordered_again
+LIMIT 1000",
+C,Q21,hard,summary_table,What is the overall customer retention rate for months 0-6 after first purchase?,,23,7,"SELECT 
+    cohort_month,
+    ROUND(100.0 * SUM(active_customers) / NULLIF(SUM(cohort_size), 0), 2) AS overall_retention_pct
+FROM 
+    summary_cohort_retention
+WHERE 
+    months_since_first BETWEEN 0 AND 6
+GROUP BY 
+    cohort_month
+ORDER BY 
+    cohort_month
+LIMIT 1000",
+C,N04,medium,glossary,How many customers have bought more than once?,,1000,1,"SELECT COUNT(DISTINCT customer_unique_id) AS repeat_customers
+FROM orders
+JOIN customers ON customers.customer_id = orders.customer_id
+GROUP BY customer_unique_id
+HAVING COUNT(DISTINCT order_id) >= 2
+LIMIT 1000",
+C,N05,medium,glossary,What is the average order value for customers in RJ?,"invalid input syntax for type integer: ""RJ""",0,1,"SELECT AVG(oi.price) / COUNT(DISTINCT oi.order_id) AS avg_order_value
+FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE c.customer_zip_code_prefix = 'RJ'
+LIMIT 1000",
+C,N10,medium,glossary,Which customer state has the slowest average delivery time?,,1,1,"SELECT c.customer_state,
+       ROUND(AVG(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_purchase_timestamp)) / 86400)::numeric, 2) AS avg_delivery_time_days
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_delivered_customer_date IS NOT NULL
+GROUP BY c.customer_state
+ORDER BY avg_delivery_time_days ASC
+LIMIT 1",
+C,N11,medium,summary_table,What was the payment approval rate in each month of 2017?,,12,12,"WITH pm AS (
+    SELECT DATE_TRUNC('month', o.order_purchase_timestamp)::date AS month,
+           COUNT(*) AS approved_orders,
+           SUM(CASE WHEN o.order_approved_at IS NOT NULL THEN 1 ELSE 0 END) AS approved_payments
+    FROM orders o
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY 1
+)
+SELECT month,
+       ROUND(100.0 * approved_payments / approved_orders, 2) AS approval_rate_pct
+FROM pm
+WHERE month BETWEEN '2017-01-01' AND '2017-12-31'
+ORDER BY month
+LIMIT 1000",
+C,N12,medium,summary_table,How many orders were delivered to customers for each purchase month in 2018?,,10,10,"SELECT 
+    EXTRACT(YEAR FROM o.order_purchase_timestamp) AS purchase_year,
+    EXTRACT(MONTH FROM o.order_purchase_timestamp) AS purchase_month,
+    COUNT(CASE WHEN o.order_status = 'delivered' THEN 1 ELSE NULL END) AS delivered_orders
+FROM 
+    orders o
+WHERE 
+    EXTRACT(YEAR FROM o.order_purchase_timestamp) = 2018
+GROUP BY 
+    purchase_year, purchase_month
+ORDER BY 
+    purchase_year, purchase_month
+LIMIT 1000",
+C,N13,hard,summary_table,What is the overall month 1 retention rate?,"column ""active_customers"" does not exist",0,1,"WITH cohort_retention AS (
+    SELECT cohort_month, retention_pct
+    FROM summary_cohort_retention
+)
+SELECT ROUND(SUM(active_customers) / SUM(cohort_size) * 100, 2) AS overall_month_1_retention_pct
+FROM cohort_retention
+LIMIT 1000",
+C,N14,easy,time,Which month had the most orders?,,1,1,"SELECT order_purchase_timestamp::date AS order_month, COUNT(*) AS order_count
+FROM orders
+WHERE order_status NOT IN ('canceled', 'unavailable')
+GROUP BY order_month
+ORDER BY order_count DESC
+LIMIT 1",
+C,N15,hard,summary_table,Which 5 sellers had the highest average weekly revenue over the last 4 weeks of seller data?,column ss.avg_4w_revenue_avg does not exist,0,5,"SELECT s.seller_id, ROUND(ss.avg_4w_revenue_avg, 2) AS avg_4w_revenue_avg
+FROM summary_seller_rolling ss
+JOIN sellers s ON s.seller_id = ss.seller_id
+ORDER BY avg_4w_revenue_avg DESC
+LIMIT 5",
+C,N16,easy,aggregation,What is the average number of installments for each payment type?,,4,5,"WITH installment_counts AS (
+    SELECT p.payment_type,
+           COUNT(*) AS installment_count
+    FROM order_payments p
+    JOIN orders o ON o.order_id = p.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.payment_type
+)
+SELECT payment_type, installment_count,
+       ROUND(100.0 * installment_count / SUM(installment_count) OVER (), 2) AS installment_share_pct
+FROM installment_counts
+ORDER BY installment_count DESC
+LIMIT 1000",
+C,N19,medium,aggregation,What percentage of orders contain more than one item?,,1,1,"SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE order_item_id > 1) / COUNT(*), 2) AS multi_item_order_pct
+FROM order_items
+LIMIT 1000",
+D,Q01,easy,ground_truth,How many orders are there for each order status?,,6,8,"SELECT order_status, COUNT(*) AS order_count
+FROM orders
+WHERE order_status NOT IN ('canceled', 'unavailable')
+GROUP BY order_status
+ORDER BY order_count DESC
+LIMIT 1000",
+D,Q04,easy,ground_truth,Which 10 states have the most unique customers?,,10,10,"SELECT c.customer_state, COUNT(DISTINCT c.customer_unique_id) AS unique_customer_count
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state
+ORDER BY unique_customer_count DESC
+LIMIT 10",
+D,Q05,easy,ground_truth,How many sellers are there in each state?,,27,23,"SELECT c.customer_state, COUNT(DISTINCT s.seller_id) AS seller_count
+FROM customers c
+JOIN orders o ON c.customer_id = o.customer_id
+JOIN order_items oi ON o.order_id = oi.order_id
+JOIN sellers s ON oi.seller_id = s.seller_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state
+ORDER BY seller_count DESC
+LIMIT 1000",
+D,Q06,easy,ground_truth,What is the average item price and average freight value?,,1000,1,"SELECT 
+    ROUND(AVG(oi.price)::numeric, 2) AS avg_item_price,
+    ROUND(AVG(oi.freight_value)::numeric, 2) AS avg_freight_value
+FROM 
+    order_items oi
+JOIN 
+    orders o ON o.order_id = oi.order_id
+WHERE 
+    o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY 
+    oi.order_id
+LIMIT 1000",
+D,Q07,medium,ground_truth,What percentage of customers are repeat customers?,,1000,1,"SELECT 
+    ROUND(100.0 * COUNT(DISTINCT c.customer_unique_id) / COUNT(DISTINCT o.customer_id), 2) AS repeat_customer_rate
+FROM 
+    orders o
+JOIN 
+    customers c ON c.customer_id = o.customer_id
+WHERE 
+    o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY 
+    c.customer_unique_id
+HAVING 
+    COUNT(DISTINCT o.order_id) >= 2
+LIMIT 1000",
+D,Q09,medium,ground_truth,What is the share of each payment type by month?,,87,90,"WITH monthly_payment_share AS (
+    SELECT DATE_TRUNC('month', o.order_purchase_timestamp)::date AS month,
+           op.payment_type,
+           SUM(op.payment_value) AS payment_value
+    FROM order_payments op
+    JOIN orders o ON o.order_id = op.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY 1, 2
+)
+SELECT month,
+       payment_type,
+       ROUND(payment_value::numeric, 2) AS payment_value,
+       ROUND(100.0 * payment_value / NULLIF(SUM(payment_value) OVER (PARTITION BY month), 0), 2) AS payment_share_pct
+FROM monthly_payment_share
+ORDER BY month, payment_type
+LIMIT 1000",
+D,Q10,medium,ground_truth,What is the monthly revenue and its month-over-month growth?,,24,24,"WITH monthly_revenue AS (
+    SELECT 
+        DATE_TRUNC('month', order_purchase_timestamp)::date AS month,
+        SUM(price) AS revenue
+    FROM 
+        order_items oi
+    JOIN 
+        orders o ON oi.order_id = o.order_id
+    WHERE 
+        o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY 
+        1
+),
+previous_month_revenue AS (
+    SELECT 
+        DATE_TRUNC('month', order_purchase_timestamp)::date AS month,
+        SUM(price) AS revenue
+    FROM 
+        order_items oi
+    JOIN 
+        orders o ON oi.order_id = o.order_id
+    WHERE 
+        o.order_status NOT IN ('canceled', 'unavailable')
+    AND DATE_TRUNC('month', order_purchase_timestamp) = DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+    GROUP BY 
+        1
+)
+SELECT 
+    mr.month,
+    mr.revenue,
+    NULLIF((mr.revenue - pm.revenue) / pm.revenue, 0) * 100 AS month_over_month_growth
+FROM 
+    monthly_revenue mr
+LEFT JOIN 
+    previous_month_revenue pm
+ON 
+    mr.month = pm.month
+ORDER BY 
+    mr.month
+LIMIT 1000",
+D,Q14,medium,ground_truth,"Which 10 product categories have the lowest average review score, among categories with at least 100 reviews?",,10,10,"SELECT COALESCE(pc.product_category_name_english, p.product_category_name) AS category,
+       AVG(r.review_score) AS avg_review_score
+FROM order_reviews r
+JOIN order_items oi ON oi.order_id = r.order_id
+JOIN products p ON p.product_id = oi.product_id
+LEFT JOIN product_categories pc ON pc.product_category_name = p.product_category_name
+WHERE r.review_score IS NOT NULL
+GROUP BY 1
+HAVING COUNT(r.review_score) >= 100
+ORDER BY avg_review_score ASC
+LIMIT 10",
+D,Q15,hard,ground_truth,Which sellers have above-average revenue but below-average review scores?,aggregate function calls cannot be nested,0,200,"SELECT s.seller_id, 
+       ROUND(SUM(oi.price), 2) AS revenue,
+       AVG(r.review_score) AS avg_review_score
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN sellers s ON s.seller_id = oi.seller_id
+LEFT JOIN order_reviews r ON r.order_id = oi.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY s.seller_id
+HAVING SUM(oi.price) > (SELECT AVG(SUM(oi.price)) FROM order_items oi
+                         JOIN orders o ON o.order_id = oi.order_id
+                         WHERE o.order_status NOT IN ('canceled', 'unavailable')
+                         GROUP BY s.seller_id)
+  AND AVG(r.review_score) < (SELECT AVG(AVG(review_score)) FROM order_reviews r
+                             JOIN order_items oi ON oi.order_id = r.order_id
+                             JOIN orders o ON o.order_id = oi.order_id
+                             WHERE o.order_status NOT IN ('canceled', 'unavailable')
+                             GROUP BY s.seller_id)
+ORDER BY revenue DESC
+LIMIT 1000",
+D,Q16,hard,ground_truth,"On average, how many days pass between a customer's first and second order?",,0,1,"SELECT 
+    c.customer_unique_id,
+    ROUND(AVG(EXTRACT(EPOCH FROM (o2.order_purchase_timestamp - o1.order_purchase_timestamp)) / 86400)::numeric, 2) AS days_between_first_and_second_order
+FROM 
+    orders o1
+JOIN 
+    orders o2 ON o1.customer_id = o2.customer_id
+JOIN 
+    customers c ON c.customer_id = o1.customer_id
+WHERE 
+    o1.order_status NOT IN ('canceled', 'unavailable') AND
+    o2.order_status NOT IN ('canceled', 'unavailable') AND
+    o1.order_id < o2.order_id
+GROUP BY 
+    c.customer_unique_id
+ORDER BY 
+    days_between_first_and_second_order ASC
+LIMIT 1",
+D,Q17,hard,ground_truth,"Which 10 category and customer state combinations have the highest late-delivery rate, with at least 50 delivered orders?","column cc.order_id does not exist HINT: Perhaps you meant to reference the column ""ld.order_id"".",0,10,"WITH late_deliveries AS (
+    SELECT o.order_id
+    FROM orders o
+    WHERE o.order_delivered_customer_date IS NOT NULL
+      AND o.order_delivered_customer_date > o.order_estimated_delivery_date
+),
+category_customer_state AS (
+    SELECT o.customer_id, c.customer_state, p.product_category_name
+    FROM orders o
+    JOIN customers c ON c.customer_id = o.customer_id
+    JOIN order_items oi ON oi.order_id = o.order_id
+    JOIN products p ON p.product_id = oi.product_id
+),
+late_delivery_counts AS (
+    SELECT cc.customer_state, cc.product_category_name, COUNT(ld.order_id) AS late_delivery_count
+    FROM category_customer_state cc
+    JOIN late_deliveries ld ON ld.order_id = cc.order_id
+    GROUP BY cc.customer_state, cc.product_category_name
+),
+top_late_delivery_categories AS (
+    SELECT lc.customer_state, lc.product_category_name, lc.late_delivery_count
+    FROM late_delivery_counts lc
+    WHERE lc.late_delivery_count >= 50
+    ORDER BY lc.late_delivery_count DESC
+    LIMIT 10
+)
+SELECT tc.customer_state, tc.product_category_name, tc.late_delivery_count
+FROM top_late_delivery_categories tc
+ORDER BY tc.late_delivery_count DESC
+LIMIT 1000",
+D,Q18,hard,ground_truth,What is the top revenue category in each customer state?,,1000,27,"SELECT c.customer_state, pc.product_category_name_english AS category, 
+       ROUND(SUM(oi.price), 2) AS revenue
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN products p ON p.product_id = oi.product_id
+LEFT JOIN product_categories pc ON pc.product_category_name = p.product_category_name
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state, pc.product_category_name_english
+ORDER BY c.customer_state, revenue DESC
+LIMIT 1000",
+D,Q19,hard,ground_truth,How many active customers are there? (active = ordered in the last 90 days of the dataset),"column ""customer_unique_id"" does not exist",0,1,"SELECT COUNT(DISTINCT customer_unique_id) AS active_customers
+FROM orders
+WHERE order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+LIMIT 1000",
+D,Q20,hard,ground_truth,How many customers gave their first order a review score of 1 or 2 and never ordered again?,,1,1,"WITH first_order_reviews AS (
+    SELECT o.customer_id, r.review_score
+    FROM orders o
+    JOIN order_reviews r ON r.order_id = o.order_id
+    WHERE r.review_score IN (1, 2)
+    GROUP BY o.customer_id, r.review_score
+),
+first_order_reviews_count AS (
+    SELECT customer_id, COUNT(*) AS review_count
+    FROM first_order_reviews
+    GROUP BY customer_id
+),
+never_ordered_again AS (
+    SELECT customer_id
+    FROM orders
+    GROUP BY customer_id
+    HAVING COUNT(DISTINCT order_id) = 1
+),
+first_order_reviews_never_ordered_again AS (
+    SELECT forc.customer_id
+    FROM first_order_reviews_count forc
+    JOIN never_ordered_again noa ON noa.customer_id = forc.customer_id
+)
+SELECT COUNT(*) AS customers
+FROM first_order_reviews_never_ordered_again
+LIMIT 1000",
+D,Q21,hard,summary_table,What is the overall customer retention rate for months 0-6 after first purchase?,,23,7,"SELECT 
+    cohort_month,
+    ROUND(100.0 * SUM(active_customers) / NULLIF(SUM(cohort_size), 0), 2) AS overall_retention_pct
+FROM 
+    summary_cohort_retention
+WHERE 
+    months_since_first BETWEEN 0 AND 6
+GROUP BY 
+    cohort_month
+ORDER BY 
+    cohort_month
+LIMIT 1000",
+D,N04,medium,glossary,How many customers have bought more than once?,,1000,1,"SELECT COUNT(DISTINCT customer_unique_id) AS repeat_customers
+FROM orders
+JOIN customers ON customers.customer_id = orders.customer_id
+GROUP BY customer_unique_id
+HAVING COUNT(DISTINCT order_id) >= 2
+LIMIT 1000",
+D,N05,medium,glossary,What is the average order value for customers in RJ?,"invalid input syntax for type integer: ""RJ""",0,1,"SELECT AVG(oi.price) / COUNT(DISTINCT oi.order_id) AS avg_order_value
+FROM order_items oi
+JOIN orders o ON oi.order_id = o.order_id
+JOIN customers c ON o.customer_id = c.customer_id
+WHERE c.customer_zip_code_prefix = 'RJ'
+LIMIT 1000",
+D,N10,medium,glossary,Which customer state has the slowest average delivery time?,,1,1,"SELECT c.customer_state,
+       ROUND(AVG(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_purchase_timestamp)) / 86400)::numeric, 2) AS avg_delivery_time_days
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_delivered_customer_date IS NOT NULL
+GROUP BY c.customer_state
+ORDER BY avg_delivery_time_days ASC
+LIMIT 1",
+D,N11,medium,summary_table,What was the payment approval rate in each month of 2017?,,12,12,"WITH pm AS (
+    SELECT DATE_TRUNC('month', o.order_purchase_timestamp)::date AS month,
+           COUNT(*) AS approved_orders,
+           SUM(CASE WHEN o.order_approved_at IS NOT NULL THEN 1 ELSE 0 END) AS approved_payments
+    FROM orders o
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY 1
+)
+SELECT month,
+       ROUND(100.0 * approved_payments / approved_orders, 2) AS approval_rate_pct
+FROM pm
+WHERE month BETWEEN '2017-01-01' AND '2017-12-31'
+ORDER BY month
+LIMIT 1000",
+D,N12,medium,summary_table,How many orders were delivered to customers for each purchase month in 2018?,,10,10,"SELECT 
+    EXTRACT(YEAR FROM o.order_purchase_timestamp) AS purchase_year,
+    EXTRACT(MONTH FROM o.order_purchase_timestamp) AS purchase_month,
+    COUNT(CASE WHEN o.order_status = 'delivered' THEN 1 ELSE NULL END) AS delivered_orders
+FROM 
+    orders o
+WHERE 
+    EXTRACT(YEAR FROM o.order_purchase_timestamp) = 2018
+GROUP BY 
+    purchase_year, purchase_month
+ORDER BY 
+    purchase_year, purchase_month
+LIMIT 1000",
+D,N13,hard,summary_table,What is the overall month 1 retention rate?,"column ""active_customers"" does not exist",0,1,"WITH cohort_retention AS (
+    SELECT cohort_month, retention_pct
+    FROM summary_cohort_retention
+)
+SELECT ROUND(SUM(active_customers) / SUM(cohort_size) * 100, 2) AS overall_month_1_retention_pct
+FROM cohort_retention
+WHERE months_since_first = 1
+LIMIT 1",
+D,N14,easy,time,Which month had the most orders?,,1,1,"SELECT order_purchase_timestamp::date AS order_month, COUNT(*) AS order_count
+FROM orders
+WHERE order_status NOT IN ('canceled', 'unavailable')
+GROUP BY order_month
+ORDER BY order_count DESC
+LIMIT 1",
+D,N15,hard,summary_table,Which 5 sellers had the highest average weekly revenue over the last 4 weeks of seller data?,column ss.avg_4w_revenue_avg does not exist,0,5,"SELECT s.seller_id, ROUND(ss.avg_4w_revenue_avg, 2) AS avg_4w_revenue_avg
+FROM summary_seller_rolling ss
+JOIN sellers s ON s.seller_id = ss.seller_id
+ORDER BY avg_4w_revenue_avg DESC
+LIMIT 5",
+D,N16,easy,aggregation,What is the average number of installments for each payment type?,,4,5,"WITH installment_counts AS (
+    SELECT p.payment_type,
+           COUNT(*) AS installment_count
+    FROM order_payments p
+    JOIN orders o ON o.order_id = p.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.payment_type
+)
+SELECT payment_type, installment_count,
+       ROUND(100.0 * installment_count / SUM(installment_count) OVER (), 2) AS installment_share_pct
+FROM installment_counts
+ORDER BY installment_count DESC
+LIMIT 1000",
+D,N19,medium,aggregation,What percentage of orders contain more than one item?,,1,1,"SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE order_item_id > 1) / COUNT(*), 2) AS multi_item_order_pct
+FROM order_items
+LIMIT 1000",
