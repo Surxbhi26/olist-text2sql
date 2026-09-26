@@ -74,7 +74,7 @@ WITH monthly AS (
     SELECT DATE_TRUNC('month', o.order_purchase_timestamp)::date AS month, SUM(oi.price) AS revenue
     FROM order_items oi
     JOIN orders o ON o.order_id = oi.order_id
-    WHERE o.order_status <> 'canceled'
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
     GROUP BY 1
 )
 SELECT month,
@@ -89,7 +89,7 @@ FROM (
     SELECT oi.order_id, SUM(oi.price) AS order_total
     FROM order_items oi
     JOIN orders o ON o.order_id = oi.order_id
-    WHERE o.order_status <> 'canceled'
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
     GROUP BY oi.order_id
 ) t;
 
@@ -106,7 +106,7 @@ ORDER BY avg_delivery_days DESC;
 SELECT oi.seller_id, ROUND(SUM(oi.price), 2) AS revenue
 FROM order_items oi
 JOIN orders o ON o.order_id = oi.order_id
-WHERE o.order_status <> 'canceled'
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
 GROUP BY oi.seller_id
 ORDER BY revenue DESC
 LIMIT 10;
@@ -129,7 +129,7 @@ WITH seller_rev AS (
     SELECT oi.seller_id, SUM(oi.price) AS revenue
     FROM order_items oi
     JOIN orders o ON o.order_id = oi.order_id
-    WHERE o.order_status <> 'canceled'
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
     GROUP BY oi.seller_id
 ),
 seller_score AS (
@@ -190,7 +190,7 @@ WITH cat_state AS (
     JOIN customers c ON c.customer_id = o.customer_id
     JOIN products p ON p.product_id = oi.product_id
     JOIN product_categories pc ON pc.product_category_name = p.product_category_name
-    WHERE o.order_status <> 'canceled'
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
     GROUP BY c.customer_state, pc.product_category_name_english
 )
 SELECT customer_state, category, ROUND(revenue, 2) AS revenue

@@ -1,0 +1,251 @@
+# Evaluation set: 40 questions.
+# - Entries with `ref:` reuse a ground-truth query from sql/ground_truth/ (question, gold SQL,
+#   difficulty). That example is automatically held out of the few-shot pool when evaluated,
+#   so the model never sees the answer. Add `question:` to override the wording.
+# - Entries with `id:` are new questions with their own gold SQL.
+# - `exclude:` holds out additional few-shot examples that are near-duplicates of the answer.
+# Run `python -m eval.check_gold` after editing: every gold query must run and return rows.
+
+questions:
+  # ---------- From ground truth (21) ----------
+  - ref: Q01
+  - ref: Q02
+  - ref: Q03
+  - ref: Q04
+  - ref: Q05
+  - ref: Q06
+  - ref: Q07
+  - ref: Q08
+  - ref: Q09
+  - ref: Q10
+  - ref: Q11
+  - ref: Q12
+  - ref: Q13
+  - ref: Q14
+  - ref: Q15
+  - ref: Q16
+  - ref: Q17
+  - ref: Q18
+  - ref: Q19
+  - ref: Q20
+  - ref: Q21
+    difficulty: hard
+    category: summary_table
+
+  # ---------- Glossary / ambiguous terms (10) ----------
+  - id: N01
+    question: What is our total GMV?
+    difficulty: medium
+    category: glossary
+    gold_sql: |
+      SELECT ROUND(SUM(oi.price + oi.freight_value), 2) AS gmv
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.order_status NOT IN ('canceled', 'unavailable')
+
+  - id: N02
+    question: What share of delivered orders arrived late?
+    difficulty: medium
+    category: glossary
+    gold_sql: |
+      SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE order_delivered_customer_date > order_estimated_delivery_date)
+                   / COUNT(*), 2) AS late_pct
+      FROM orders
+      WHERE order_delivered_customer_date IS NOT NULL
+
+  - id: N03
+    question: What is the late delivery rate in each customer state?
+    difficulty: medium
+    category: glossary
+    gold_sql: |
+      SELECT c.customer_state,
+             ROUND(100.0 * COUNT(*) FILTER (WHERE o.order_delivered_customer_date > o.order_estimated_delivery_date)
+                   / COUNT(*), 2) AS late_pct
+      FROM orders o
+      JOIN customers c ON c.customer_id = o.customer_id
+      WHERE o.order_delivered_customer_date IS NOT NULL
+      GROUP BY c.customer_state
+      ORDER BY late_pct DESC
+
+  - id: N04
+    question: How many customers have bought more than once?
+    difficulty: medium
+    category: glossary
+    exclude: [Q07]
+    gold_sql: |
+      SELECT COUNT(*) AS repeat_customers
+      FROM (
+          SELECT c.customer_unique_id
+          FROM orders o
+          JOIN customers c ON c.customer_id = o.customer_id
+          WHERE o.order_status NOT IN ('canceled', 'unavailable')
+          GROUP BY c.customer_unique_id
+          HAVING COUNT(DISTINCT o.order_id) >= 2
+      ) t
+
+  - id: N05
+    question: What is the average order value for customers in RJ?
+    difficulty: medium
+    category: glossary
+    exclude: [Q11]
+    gold_sql: |
+      SELECT ROUND(SUM(oi.price) / COUNT(DISTINCT oi.order_id), 2) AS avg_order_value
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      JOIN customers c ON c.customer_id = o.customer_id
+      WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        AND c.customer_state = 'RJ'
+
+  - id: N06
+    question: How many orders were canceled?
+    difficulty: easy
+    category: glossary_trap
+    gold_sql: |
+      SELECT COUNT(*) AS canceled_orders
+      FROM orders
+      WHERE order_status = 'canceled'
+
+  - id: N07
+    question: What percentage of total payment value was paid by credit card?
+    difficulty: medium
+    category: glossary
+    exclude: [Q09]
+    gold_sql: |
+      SELECT ROUND(100.0 * SUM(payment_value) FILTER (WHERE payment_type = 'credit_card')
+                   / SUM(payment_value), 2) AS credit_card_pct
+      FROM order_payments
+
+  - id: N08
+    question: What percentage of reviews are negative (1 or 2 stars)?
+    difficulty: easy
+    category: glossary
+    gold_sql: |
+      SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE review_score <= 2) / COUNT(*), 2) AS negative_pct
+      FROM order_reviews
+
+  - id: N09
+    question: What was the revenue in the last 90 days of data?
+    difficulty: medium
+    category: glossary
+    gold_sql: |
+      SELECT ROUND(SUM(oi.price), 2) AS revenue
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        AND o.order_purchase_timestamp >= (SELECT MAX(order_purchase_timestamp) FROM orders) - INTERVAL '90 days'
+
+  - id: N10
+    question: Which customer state has the slowest average delivery time?
+    difficulty: medium
+    category: glossary
+    exclude: [Q12]
+    gold_sql: |
+      SELECT c.customer_state,
+             ROUND(AVG(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_purchase_timestamp)) / 86400)::numeric, 1) AS avg_days
+      FROM orders o
+      JOIN customers c ON c.customer_id = o.customer_id
+      WHERE o.order_delivered_customer_date IS NOT NULL
+      GROUP BY c.customer_state
+      ORDER BY avg_days DESC
+      LIMIT 1
+
+  # ---------- Summary tables / hard (9) ----------
+  - id: N11
+    question: What was the payment approval rate in each month of 2017?
+    difficulty: medium
+    category: summary_table
+    gold_sql: |
+      SELECT purchase_month, approved_pct
+      FROM summary_order_funnel
+      WHERE purchase_month >= '2017-01-01' AND purchase_month < '2018-01-01'
+      ORDER BY purchase_month
+
+  - id: N12
+    question: How many orders were delivered to customers for each purchase month in 2018?
+    difficulty: medium
+    category: summary_table
+    gold_sql: |
+      SELECT purchase_month, delivered
+      FROM summary_order_funnel
+      WHERE purchase_month >= '2018-01-01'
+      ORDER BY purchase_month
+
+  - id: N13
+    question: What is the overall month 1 retention rate?
+    difficulty: hard
+    category: summary_table
+    exclude: [Q21]
+    gold_sql: |
+      WITH c AS (SELECT DISTINCT cohort_month, cohort_size FROM summary_cohort_retention)
+      SELECT ROUND(100.0 * COALESCE(SUM(r.active_customers), 0) / SUM(c.cohort_size), 2) AS month_1_retention
+      FROM c
+      LEFT JOIN summary_cohort_retention r
+             ON r.cohort_month = c.cohort_month AND r.months_since_first = 1
+      WHERE c.cohort_month + INTERVAL '1 month' <= (SELECT MAX(cohort_month) FROM c)
+
+  - id: N14
+    question: Which month had the most orders?
+    difficulty: easy
+    category: time
+    gold_sql: |
+      SELECT DATE_TRUNC('month', order_purchase_timestamp)::date AS month, COUNT(*) AS orders
+      FROM orders
+      GROUP BY 1
+      ORDER BY orders DESC
+      LIMIT 1
+
+  - id: N15
+    question: Which 5 sellers had the highest average weekly revenue over the last 4 weeks of seller data?
+    difficulty: hard
+    category: summary_table
+    gold_sql: |
+      WITH last AS (SELECT MAX(week_start) AS w FROM summary_seller_rolling)
+      SELECT seller_id, ROUND(AVG(weekly_revenue)::numeric, 2) AS avg_weekly_revenue
+      FROM summary_seller_rolling
+      WHERE week_start > (SELECT w FROM last) - INTERVAL '4 weeks'
+      GROUP BY seller_id
+      ORDER BY avg_weekly_revenue DESC
+      LIMIT 5
+
+  - id: N16
+    question: What is the average number of installments for each payment type?
+    difficulty: easy
+    category: aggregation
+    gold_sql: |
+      SELECT payment_type, ROUND(AVG(payment_installments)::numeric, 2) AS avg_installments
+      FROM order_payments
+      GROUP BY payment_type
+      ORDER BY avg_installments DESC
+
+  - id: N17
+    question: Which 5 cities have the most unique customers?
+    difficulty: easy
+    category: aggregation
+    exclude: [Q04]
+    gold_sql: |
+      SELECT customer_city, COUNT(DISTINCT customer_unique_id) AS customers
+      FROM customers
+      GROUP BY customer_city
+      ORDER BY customers DESC
+      LIMIT 5
+
+  - id: N18
+    question: What was the total revenue in each year?
+    difficulty: easy
+    category: time
+    exclude: [Q10]
+    gold_sql: |
+      SELECT EXTRACT(YEAR FROM o.order_purchase_timestamp)::int AS year, ROUND(SUM(oi.price), 2) AS revenue
+      FROM order_items oi
+      JOIN orders o ON o.order_id = oi.order_id
+      WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      GROUP BY 1
+      ORDER BY 1
+
+  - id: N19
+    question: What percentage of orders contain more than one item?
+    difficulty: medium
+    category: aggregation
+    gold_sql: |
+      SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE n_items > 1) / COUNT(*), 2) AS multi_item_pct
+      FROM (SELECT order_id, COUNT(*) AS n_items FROM order_items GROUP BY order_id) t

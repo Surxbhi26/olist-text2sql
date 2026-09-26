@@ -1,0 +1,69 @@
+strategy,id,difficulty,category,question,error,pred_rows,gold_rows,pred_sql,failure_type
+A,Q01,easy,ground_truth,How many orders are there for each order status?,,7,8,"SELECT 
+    os.order_status AS order_status,
+    COUNT(*) AS order_count
+FROM 
+    orders os
+JOIN 
+    order_items oi ON os.order_id = oi.order_id
+WHERE 
+    os.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    os.order_status
+ORDER BY 
+    order_count DESC
+LIMIT 1000",
+A,Q02,easy,ground_truth,What are the top 10 product categories by revenue?,column p.category_name does not exist,0,10,"WITH TopCategories AS (
+    SELECT 
+        p.category_name,
+        SUM(olp.total_price) AS total_revenue
+    FROM 
+        products p
+    JOIN 
+        order_items oi ON p.product_id = oi.product_id
+    JOIN 
+        order_payments op ON oi.order_id = op.order_id
+    JOIN 
+        orders o ON oi.order_id = o.order_id
+    WHERE 
+        o.order_purchase_timestamp >= '2018-01-01'
+        AND o.order_purchase_timestamp < '2019-01-01'
+        AND o.order_status = 'delivered'
+    GROUP BY 
+        p.category_name
+    ORDER BY 
+        total_revenue DESC
+    LIMIT 10
+)
+SELECT 
+    category_name,
+    total_revenue
+FROM 
+    TopCategories
+LIMIT 1000",
+B,Q02,easy,ground_truth,What are the top 10 product categories by revenue?,"SQL parse error: Expecting ). Line 3, Col: 37.",0,10,"SELECT 
+    p.product_category_name,
+    SUM(oi.price + oi.f freight_value) AS total_revenue
+FROM 
+    order_items oi
+JOIN 
+    products p ON oi.product_id = p.product_id
+WHERE 
+    oi.order_purchase_timestamp <= '2018-12-31'
+GROUP BY 
+    p.product_category_name
+ORDER BY 
+    total_revenue DESC
+LIMIT 10",
+C,Q01,easy,ground_truth,How many orders are there for each order status?,,6,8,"SELECT order_status, COUNT(*) AS order_count
+FROM orders
+WHERE order_status NOT IN ('canceled', 'unavailable')
+GROUP BY order_status
+ORDER BY order_count DESC
+LIMIT 1000",
+D,Q01,easy,ground_truth,How many orders are there for each order status?,,6,8,"SELECT order_status, COUNT(*) AS order_count
+FROM orders
+WHERE order_status NOT IN ('canceled', 'unavailable')
+GROUP BY order_status
+ORDER BY order_count DESC
+LIMIT 1000",

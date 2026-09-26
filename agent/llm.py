@@ -50,7 +50,7 @@ def _ollama(system, user, temperature):
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=600) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"Ollama error {e.code}: {e.read().decode()[:300]}") from e
